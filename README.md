@@ -1,4 +1,4 @@
-# TTRV: Test-Time Reinforcement Learning for Vision–Language Models
+# TTRV: Test-Time Reinforcement Learning for Vision–Language Models (CVPR 2026)
 
 <p align="center">
   <img src="figs/TTRV-main_table_final.png" alt="Overview of TTRV" style="width:80%;">
