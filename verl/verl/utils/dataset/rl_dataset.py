@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import copy
+import hashlib
 import logging
 import os
 import re
@@ -119,6 +120,7 @@ class RLHFDataset(Dataset):
         self.need_tools_kwargs = config.get("need_tools_kwargs", False)
         self.filter_prompts = config.get("filter_prompts", True)
         self.serialize_dataset = False
+        self._point_cloud_cache = {}
         self._download()
         self._read_files_and_tokenize()
 
@@ -187,6 +189,53 @@ class RLHFDataset(Dataset):
 
     def __len__(self):
         return len(self.dataframe)
+
+    def _sample_point_cloud(self, point_cloud: np.ndarray, pc_path: str) -> np.ndarray:
+        num_points = int(self.config.get("point_cloud_num_points", 40000))
+        if point_cloud.shape[0] == num_points:
+            return point_cloud
+
+        seed_bytes = hashlib.md5(os.path.abspath(pc_path).encode("utf-8")).digest()[:8]
+        seed = int.from_bytes(seed_bytes, byteorder="little", signed=False)
+        rng = np.random.default_rng(seed)
+        replace = point_cloud.shape[0] < num_points
+        choice = rng.choice(point_cloud.shape[0], num_points, replace=replace)
+        return point_cloud[choice]
+
+    def _load_point_cloud(self, pc_path: str) -> np.ndarray:
+        pc_path = os.path.expanduser(pc_path)
+        if not hasattr(self, "_point_cloud_cache"):
+            self._point_cloud_cache = {}
+        cached = self._point_cloud_cache.get(pc_path)
+        if cached is not None:
+            return cached
+
+        point_cloud = np.load(pc_path)
+        if point_cloud.ndim != 2 or point_cloud.shape[1] not in (3, 6, 7, 9, 10):
+            raise ValueError(
+                f"Expected point cloud with shape [N,3], [N,6], [N,7], [N,9], or [N,10], got {point_cloud.shape} from {pc_path}"
+            )
+        point_cloud = point_cloud.astype(np.float32, copy=True)
+        if point_cloud.shape[1] == 3:
+            point_cloud = np.concatenate([point_cloud, np.zeros_like(point_cloud)], axis=1)
+        if point_cloud.shape[1] == 9:
+            mean_color_rgb = np.array([109.8, 97.2, 83.8], dtype=np.float32)
+            if np.nanmax(np.abs(point_cloud[:, 3:6])) > 10:
+                point_cloud[:, 3:6] = (point_cloud[:, 3:6] - mean_color_rgb) / 256.0
+            floor_height = np.percentile(point_cloud[:, 2], 0.99)
+            height = point_cloud[:, 2:3] - floor_height
+            point_cloud = np.concatenate([point_cloud[:, :9], height], axis=1)
+        if point_cloud.shape[1] in (7, 10):
+            point_cloud = self._sample_point_cloud(point_cloud, pc_path)
+            if point_cloud.shape[1] == 7 and np.nanmax(np.abs(point_cloud[:, 3:6])) > 10:
+                mean_color_rgb = np.array([109.8, 97.2, 83.8], dtype=np.float32)
+                point_cloud[:, 3:6] = (point_cloud[:, 3:6] - mean_color_rgb) / 256.0
+            if point_cloud.shape[1] == 10 and np.nanmax(np.abs(point_cloud[:, 3:6])) > 10:
+                mean_color_rgb = np.array([109.8, 97.2, 83.8], dtype=np.float32)
+                point_cloud[:, 3:6] = (point_cloud[:, 3:6] - mean_color_rgb) / 256.0
+        point_cloud = point_cloud.astype(np.float32, copy=False)
+        self._point_cloud_cache[pc_path] = point_cloud
+        return point_cloud
 
     def _build_messages(self, example: dict):
         messages: list = example.pop(self.prompt_key)
@@ -277,6 +326,15 @@ class RLHFDataset(Dataset):
         if self.return_full_prompt:
             row_dict["full_prompts"] = raw_prompt  # array of strings
 
+        pc_path = row_dict.get("extra_info", {}).get("pc_path")
+        if pc_path:
+            point_cloud = self._load_point_cloud(pc_path)
+            row_dict["point_clouds"] = torch.from_numpy(point_cloud)
+            row_dict["box_query"] = torch.zeros((1, 8, 3), dtype=torch.float32)
+            row_dict["box_mask"] = torch.zeros((1,), dtype=torch.float32)
+            row_dict["click_query"] = torch.zeros((1, 3), dtype=torch.float32)
+            row_dict["click_mask"] = torch.zeros((1,), dtype=torch.float32)
+
         # add index for each prompt
         index = row_dict.get("extra_info", {}).get("index", 0)
         tools_kwargs = row_dict.get("extra_info", {}).get("tools_kwargs", {})
@@ -295,6 +353,8 @@ class RLHFDataset(Dataset):
 
             if "dataframe" in state:
                 del state["dataframe"]
+            if "_point_cloud_cache" in state:
+                del state["_point_cloud_cache"]
             return state
 
         return self.__dict__.copy()

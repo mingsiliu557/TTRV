@@ -34,6 +34,8 @@ from verl.workers.actor import BasePPOActor
 
 __all__ = ["DataParallelPPOActor"]
 
+POINT_CLOUD_MODEL_KEYS = ("point_clouds", "box_query", "box_mask", "click_query", "click_mask")
+
 
 class DataParallelPPOActor(BasePPOActor):
     def __init__(self, config, actor_module: nn.Module, actor_optimizer: torch.optim.Optimizer = None):
@@ -83,10 +85,25 @@ class DataParallelPPOActor(BasePPOActor):
             attention_mask = micro_batch["attention_mask"]
             position_ids = micro_batch["position_ids"]
             entropy = None
+            model_type = getattr(getattr(self.actor_module, "config", None), "model_type", None)
+            if "point_clouds" in micro_batch:
+                try:
+                    model_dtype = next(self.actor_module.parameters()).dtype
+                except StopIteration:
+                    model_dtype = torch.bfloat16
+                for key in POINT_CLOUD_MODEL_KEYS:
+                    if key not in micro_batch:
+                        continue
+                    dtype = model_dtype if key == "point_clouds" else torch.float32
+                    multi_modal_inputs[key] = micro_batch[key].to(device=input_ids.device, dtype=dtype)
             if position_ids.dim() == 3:  # qwen2vl mrope
                 position_ids = position_ids.transpose(0, 1)  # (bsz, 3, seqlen) -> (3, bsz, seqlen)
 
-            if self.use_remove_padding:
+            use_remove_padding = self.use_remove_padding and "point_clouds" not in micro_batch
+            if self.use_remove_padding and "point_clouds" in micro_batch:
+                print("Point-cloud inputs detected; disabling remove_padding for this micro batch.")
+
+            if use_remove_padding:
                 input_ids_rmpad, indices, *_ = unpad_input(
                     input_ids.unsqueeze(-1), attention_mask
                 )  # input_ids_rmpad (total_nnz, ...)
@@ -133,16 +150,20 @@ class DataParallelPPOActor(BasePPOActor):
                 input_ids_rmpad_rolled = input_ids_rmpad_rolled.squeeze(0)  # ((total_nnz / sp) + pad)
 
                 # only pass input_ids and position_ids to enable flash_attn_varlen
-                output = self.actor_module(
-                    input_ids=input_ids_rmpad,
-                    attention_mask=None,
-                    position_ids=position_ids_rmpad,
+                forward_kwargs = {
+                    "input_ids": input_ids_rmpad,
+                    "attention_mask": None,
                     **multi_modal_inputs,
-                    use_cache=False,
-                )  # prevent model thinks we are generating
+                    "use_cache": False,
+                }
+                if model_type != "pointllm":
+                    forward_kwargs["position_ids"] = position_ids_rmpad
+                if model_type == "ll3da":
+                    forward_kwargs["response_length"] = response_length
+                output = self.actor_module(**forward_kwargs)  # prevent model thinks we are generating
                 logits_rmpad = output.logits.squeeze(0)  # (total_nnz, vocab_size)
 
-                logits_rmpad.div_(temperature)
+                logits_rmpad = logits_rmpad / temperature
 
                 # if use_sp: ((total_nnz / sp) + pad) ; if not use_sp: (batch, seqlen)
                 inplace_backward = True
@@ -179,15 +200,19 @@ class DataParallelPPOActor(BasePPOActor):
                 log_probs = full_log_probs.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
 
             else:  # not using rmpad and no ulysses sp
-                output = self.actor_module(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    position_ids=position_ids,
+                forward_kwargs = {
+                    "input_ids": input_ids,
+                    "attention_mask": attention_mask,
                     **multi_modal_inputs,
-                    use_cache=False,
-                )  # prevent model thinks we are generating
+                    "use_cache": False,
+                }
+                if model_type != "pointllm":
+                    forward_kwargs["position_ids"] = position_ids
+                if model_type == "ll3da":
+                    forward_kwargs["response_length"] = response_length
+                output = self.actor_module(**forward_kwargs)  # prevent model thinks we are generating
                 logits = output.logits
-                logits.div_(temperature)
+                logits = logits / temperature
                 logits = logits[:, -response_length - 1 : -1, :]  # (bsz, response_length, vocab_size)
                 log_probs = logprobs_from_logits(logits, micro_batch["responses"])
                 if calculate_entropy:
@@ -237,6 +262,8 @@ class DataParallelPPOActor(BasePPOActor):
         use_dynamic_bsz = data.meta_info["use_dynamic_bsz"]
 
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
+        if "point_clouds" in data.batch.keys():
+            select_keys.extend([key for key in POINT_CLOUD_MODEL_KEYS if key in data.batch.keys()])
         batch = data.select(batch_keys=select_keys).batch
         has_multi_modal_inputs = "multi_modal_inputs" in data.non_tensor_batch.keys()
 
@@ -278,6 +305,37 @@ class DataParallelPPOActor(BasePPOActor):
 
         return log_probs, entropys
 
+    def _trainable_param_checksum(self):
+        snapshot = self._trainable_param_snapshot()
+        return self._param_snapshot_checksum(snapshot)
+
+    def _param_snapshot_checksum(self, snapshot):
+        if snapshot.numel() == 0:
+            return 0.0
+        weights = ((torch.arange(snapshot.numel(), dtype=torch.float32) % 997) + 1.0) / 997.0
+        return (snapshot.float() * weights).sum().item()
+
+    def _trainable_param_snapshot(self):
+        samples = []
+        samples_per_param = int(self.config.get("param_checksum_samples_per_param", 4096))
+        with torch.no_grad():
+            for param in self.actor_module.parameters():
+                if not param.requires_grad or param.numel() == 0:
+                    continue
+                flat = param.detach().float().reshape(-1)
+                take = min(flat.numel(), samples_per_param)
+                if take <= 0:
+                    continue
+                if take == flat.numel():
+                    sampled = flat
+                else:
+                    stride = max(flat.numel() // take, 1)
+                    sampled = flat[::stride][:take]
+                samples.append(sampled.detach().cpu())
+        if not samples:
+            return torch.empty(0, dtype=torch.float32)
+        return torch.cat(samples).float()
+
     def update_policy(self, data: DataProto):
         # make sure we are in training mode
         self.actor_module.train()
@@ -285,6 +343,8 @@ class DataParallelPPOActor(BasePPOActor):
         temperature = data.meta_info["temperature"]  # temperature must be in the data.meta_info to avoid slient error
 
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids", "old_log_probs", "advantages"]
+        if "point_clouds" in data.batch.keys():
+            select_keys.extend([key for key in POINT_CLOUD_MODEL_KEYS if key in data.batch.keys()])
         if self.config.use_kl_loss:
             select_keys.append("ref_log_prob")
         batch = data.select(batch_keys=select_keys).batch
@@ -321,6 +381,11 @@ class DataParallelPPOActor(BasePPOActor):
                     micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
 
                 self.actor_optimizer.zero_grad()
+                checksum_before = None
+                param_snapshot_before = None
+                if self.config.get("log_param_checksum", False):
+                    param_snapshot_before = self._trainable_param_snapshot()
+                    checksum_before = self._param_snapshot_checksum(param_snapshot_before)
 
                 for data in micro_batches:
                     # Support all hardwares
@@ -405,6 +470,39 @@ class DataParallelPPOActor(BasePPOActor):
 
                 grad_norm = self._optimizer_step()
                 data = {"actor/grad_norm": grad_norm.detach().item()}
+                if self.actor_optimizer is not None and self.actor_optimizer.param_groups:
+                    lr = self.actor_optimizer.param_groups[0]["lr"]
+                    data["actor/lr"] = lr
+                    data["actor/lr_x1e6"] = lr * 1_000_000.0
+                if checksum_before is not None:
+                    param_snapshot_after = self._trainable_param_snapshot()
+                    checksum_after = self._param_snapshot_checksum(param_snapshot_after)
+                    if (
+                        param_snapshot_before is not None
+                        and param_snapshot_after.numel() == param_snapshot_before.numel()
+                        and param_snapshot_after.numel() > 0
+                    ):
+                        param_delta = (param_snapshot_after - param_snapshot_before).abs()
+                        param_delta_mean = param_delta.mean().item()
+                        param_delta_max = param_delta.max().item()
+                        param_delta_sum = param_delta.sum().item()
+                    else:
+                        param_delta_mean = 0.0
+                        param_delta_max = 0.0
+                        param_delta_sum = 0.0
+                    data.update(
+                        {
+                            "actor/param_checksum_before": checksum_before,
+                            "actor/param_checksum_after": checksum_after,
+                            "actor/param_checksum_delta": checksum_after - checksum_before,
+                            "actor/param_checksum_delta_abs_scaled": abs(checksum_after - checksum_before)
+                            * 1_000_000.0,
+                            "actor/param_sample_delta_abs_mean": param_delta_mean,
+                            "actor/param_sample_delta_abs_max": param_delta_max,
+                            "actor/param_sample_delta_abs_sum": param_delta_sum,
+                            "actor/param_sample_count": float(param_snapshot_after.numel()),
+                        }
+                    )
             append_to_dict(metrics, data)
         self.actor_optimizer.zero_grad()
         return metrics

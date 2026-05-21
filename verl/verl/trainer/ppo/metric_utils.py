@@ -187,8 +187,33 @@ def calc_maj_val(data: list[dict[str, Any]], vote_key: str, val_key: str) -> flo
     return maj_val
 
 
+def _deterministic_metric_for_n(var_vals: list[Any], var2vals: dict[str, list[Any]], n: int) -> dict[str, float]:
+    """Cheap validation metrics for large multi-sample evals.
+
+    SQA3D reports its authoritative EM/unknown numbers separately via
+    summarize_sqa3d_validation. These deterministic summaries avoid spending
+    minutes bootstrapping generic auxiliary metrics over thousands of prompts.
+    """
+    vals = list(var_vals[:n])
+    metric = {
+        f"best@{n}/mean": float(np.max(vals)),
+        f"best@{n}/std": 0.0,
+        f"worst@{n}/mean": float(np.min(vals)),
+        f"worst@{n}/std": 0.0,
+    }
+    if var2vals.get("pred", None) is not None:
+        vote_data = [{"val": val, "pred": pred} for val, pred in zip(vals, var2vals["pred"][:n])]
+        metric[f"maj@{n}/mean"] = float(calc_maj_val(vote_data, vote_key="pred", val_key="val"))
+        metric[f"maj@{n}/std"] = 0.0
+    return metric
+
+
 def process_validation_metrics(
-    data_sources: list[str], sample_inputs: list[str], infos_dict: dict[str, list[Any]], seed: int = 42
+    data_sources: list[str],
+    sample_inputs: list[str],
+    infos_dict: dict[str, list[Any]],
+    seed: int = 42,
+    group_keys: list[str] | None = None,
 ) -> dict[str, dict[str, dict[str, float]]]:
     """Process validation metrics into a structured format.
 
@@ -196,14 +221,22 @@ def process_validation_metrics(
         data_sources: Array of data source identifiers for each sample
         sample_inputs: List of input prompts
         infos_dict: variable name -> list of values for each sample
+        group_keys: Optional grouping keys. Defaults to sample_inputs for
+            backwards-compatible text prompt grouping.
 
     Returns:
         dict[str, dict[str, dict[str, float]]]: data source -> variable name -> metric value
     """
-    # Group metrics by data source, prompt and variable
+    if group_keys is None:
+        group_keys = sample_inputs
+    assert len(group_keys) == len(data_sources), f"{len(group_keys)=}, {len(data_sources)=}"
+    unique_groups = len(set(group_keys))
+    use_fast_large_eval = unique_groups >= 1000
+
+    # Group metrics by data source, group key and variable
     data_src2prompt2var2vals = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
     for sample_idx, data_source in enumerate(data_sources):
-        prompt = sample_inputs[sample_idx]
+        prompt = group_keys[sample_idx]
         var2vals = data_src2prompt2var2vals[data_source][prompt]
         for var_name, var_vals in infos_dict.items():
             var2vals[var_name].append(var_vals[sample_idx])
@@ -220,30 +253,46 @@ def process_validation_metrics(
                 metric[f"mean@{n_resps}"] = np.mean(var_vals)
                 metric[f"std@{n_resps}"] = np.std(var_vals)
 
+                if n_resps == 1:
+                    value = float(var_vals[0])
+                    metric["best@1/mean"] = value
+                    metric["best@1/std"] = 0.0
+                    metric["worst@1/mean"] = value
+                    metric["worst@1/std"] = 0.0
+                    if var2vals.get("pred", None) is not None:
+                        metric["maj@1/mean"] = value
+                        metric["maj@1/std"] = 0.0
+                    data_src2prompt2var2metric[data_source][prompt][var_name] = metric
+                    continue
+
                 ns = [1]
                 n = 2
                 while n < n_resps:
                     ns.append(n)
                     n *= 2
-                ns.append(n_resps)
+                if ns[-1] != n_resps:
+                    ns.append(n_resps)
 
                 for n in ns:
-                    # Best/Worst-of-N
-                    [(bon_mean, bon_std), (won_mean, won_std)] = bootstrap_metric(
-                        data=var_vals, subset_size=n, reduce_fns=[np.max, np.min], seed=seed
-                    )
-                    metric[f"best@{n}/mean"], metric[f"best@{n}/std"] = bon_mean, bon_std
-                    metric[f"worst@{n}/mean"], metric[f"worst@{n}/std"] = won_mean, won_std
-                    # Majority voting
-                    if var2vals.get("pred", None) is not None:
-                        vote_data = [{"val": val, "pred": pred} for val, pred in zip(var_vals, var2vals["pred"])]
-                        [(maj_n_mean, maj_n_std)] = bootstrap_metric(
-                            data=vote_data,
-                            subset_size=n,
-                            reduce_fns=[partial(calc_maj_val, vote_key="pred", val_key="val")],
-                            seed=seed,
+                    if use_fast_large_eval:
+                        metric.update(_deterministic_metric_for_n(var_vals, var2vals, n))
+                    else:
+                        # Best/Worst-of-N
+                        [(bon_mean, bon_std), (won_mean, won_std)] = bootstrap_metric(
+                            data=var_vals, subset_size=n, reduce_fns=[np.max, np.min], seed=seed
                         )
-                        metric[f"maj@{n}/mean"], metric[f"maj@{n}/std"] = maj_n_mean, maj_n_std
+                        metric[f"best@{n}/mean"], metric[f"best@{n}/std"] = bon_mean, bon_std
+                        metric[f"worst@{n}/mean"], metric[f"worst@{n}/std"] = won_mean, won_std
+                        # Majority voting
+                        if var2vals.get("pred", None) is not None:
+                            vote_data = [{"val": val, "pred": pred} for val, pred in zip(var_vals, var2vals["pred"])]
+                            [(maj_n_mean, maj_n_std)] = bootstrap_metric(
+                                data=vote_data,
+                                subset_size=n,
+                                reduce_fns=[partial(calc_maj_val, vote_key="pred", val_key="val")],
+                                seed=seed,
+                            )
+                            metric[f"maj@{n}/mean"], metric[f"maj@{n}/std"] = maj_n_mean, maj_n_std
 
                 data_src2prompt2var2metric[data_source][prompt][var_name] = metric
 

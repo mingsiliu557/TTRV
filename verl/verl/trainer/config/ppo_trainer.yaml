@@ -2,6 +2,7 @@ data:
   tokenizer: null
   train_files: ~/data/rlhf/gsm8k/train.parquet
   val_files: ~/data/rlhf/gsm8k/test.parquet
+  cache_dir: ~/.cache/verl/rlhf
   prompt_key: prompt
   reward_fn_key: data_source
   max_prompt_length: 512
@@ -13,6 +14,7 @@ data:
   shuffle: True
   filter_overlong_prompts: False # for large-scale dataset, filtering overlong prompts could be timeconsuming. You cat set the filter_overlong_prompts_workers to use multiprocessing to speed up.
   filter_overlong_prompts_workers: 1
+  point_cloud_num_points: 40000
   truncation: error
   image_key: images
   video_key: videos
@@ -30,6 +32,23 @@ actor_rollout_ref:
     enable_gradient_checkpointing: True
     use_remove_padding: False
     use_liger: False
+    trust_remote_code: False
+    lora_rank: 0
+    lora_alpha: 16
+    target_modules: all-linear
+    ll3da_repo_path: null
+    ll3da_ckpt_path: null
+    ll3da_detector_ckpt_path: null
+    ll3da_qformer_vocab: bert-base-embedding
+    ll3da_use_color: True
+    ll3da_use_normal: False
+    ll3da_no_height: False
+    ll3da_use_multiview: False
+    ll3da_detector: detector_Vote2Cap_DETR
+    ll3da_captioner: ll3da
+    ll3da_max_prompts: 1
+    ll3da_grid_size_3d: 255
+    ll3da_train_scope: llm
   actor:
     strategy: fsdp  # This is for backward-compatibility
     ppo_mini_batch_size: 256
@@ -63,6 +82,7 @@ actor_rollout_ref:
       total_training_steps: -1  # must be override by program
       weight_decay: 0.01
     fsdp_config:
+      model_dtype: null
       wrap_policy:
         # transformer_layer_cls_to_wrap: None
         min_num_params: 0
@@ -186,6 +206,7 @@ reward_model:
     n_samples_per_prompt: 8
     n_votes_per_prompt: 8
     mode: "train"
+    alpha: 0.5
 
 custom_reward_function:
   path: null

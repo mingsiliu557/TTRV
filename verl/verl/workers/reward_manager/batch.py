@@ -26,6 +26,10 @@ class BatchRewardManager:
         self.compute_score = compute_score
         self.reward_fn_key = reward_fn_key
         self.reward_kwargs = reward_kwargs
+        self._already_printed = defaultdict(int)
+
+    def reset_examine_counter(self):
+        self._already_printed = defaultdict(int)
 
     def verify(self, data):
         prompt_ids = data.batch["prompts"]
@@ -74,8 +78,6 @@ class BatchRewardManager:
 
         scores = self.verify(data)
         rewards = []
-        already_printed = {}
-
         for i in range(len(data)):
             length = valid_response_lengths[i].item()
             score = scores[i]
@@ -91,7 +93,7 @@ class BatchRewardManager:
             reward_tensor[i, length - 1] = reward
 
             data_source = data_sources[i]
-            if already_printed.get(data_source, 0) < self.num_examine:
+            if self._already_printed[data_source] < self.num_examine:
                 response_str = self.tokenizer.decode(data.batch["responses"][i][:length], skip_special_tokens=True)
                 prompt_str = self.tokenizer.decode(data.batch["prompts"][i], skip_special_tokens=True)
                 ground_truth = data[i].non_tensor_batch["reward_model"].get("ground_truth", None)
@@ -99,7 +101,7 @@ class BatchRewardManager:
                 print("[response]", response_str)
                 print("[ground_truth]", ground_truth)
                 print("[score]", scores[i])
-                already_printed[data_source] = already_printed.get(data_source, 0) + 1
+                self._already_printed[data_source] += 1
 
         data.batch["acc"] = torch.tensor(rewards, dtype=torch.float32, device=prompt_ids.device)
 

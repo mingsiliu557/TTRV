@@ -14,6 +14,7 @@
 """
 The main entry point to run the PPO algorithm
 """
+import contextlib
 import re 
 import logging
 import os
@@ -24,6 +25,7 @@ import torch
 import torch.distributed
 from codetiming import Timer
 from omegaconf import DictConfig, open_dict
+from omegaconf import DictConfig as OmegaDictConfig, ListConfig as OmegaListConfig
 from torch.distributed.device_mesh import init_device_mesh
 
 import verl.utils.torch_functional as verl_F
@@ -50,6 +52,14 @@ from verl.workers.sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManage
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_PPO_LOGGING_LEVEL", "WARN"))
+
+
+def _to_plain_config(obj):
+    if isinstance(obj, (OmegaDictConfig, dict)):
+        return {k: _to_plain_config(v) for k, v in obj.items()}
+    if isinstance(obj, (OmegaListConfig, list, tuple)):
+        return [_to_plain_config(v) for v in obj]
+    return obj
 
 
 def create_device_mesh(world_size, fsdp_size):
@@ -189,7 +199,19 @@ class ActorRolloutRefWorker(Worker):
             torch_dtype = PrecisionType.to_dtype(torch_dtype)
 
         # override model kwargs
+        is_ll3da = bool(
+            self.config.model.get("ll3da_ckpt_path", None)
+            or self.config.model.get("ll3da_repo_path", None)
+            or "ll3da" in str(model_path).lower()
+        )
         actor_model_config = AutoConfig.from_pretrained(local_path, trust_remote_code=trust_remote_code)
+        if role == "ref" and getattr(actor_model_config, "model_type", None) == "pointllm":
+            # PointLLM's PointBERT contains Conv/BatchNorm blocks. In the ref
+            # policy, FSDP mixed precision can leave Conv outputs in fp32 while
+            # sharding BatchNorm weights as bf16, which crashes KL logprob.
+            # Keep only the reference policy in fp32; actor policy still uses
+            # the configured bf16 full-parameter RL path.
+            torch_dtype = torch.float32
 
         self.generation_config = get_generation_config(local_path, trust_remote_code=trust_remote_code)
 
@@ -204,18 +226,42 @@ class ActorRolloutRefWorker(Worker):
             print(f"Model config after override: {actor_model_config}")
 
         # NOTE(fix me): tie_word_embedding causes meta_tensor init to hang
-        init_context = get_init_weight_context_manager(
-            use_meta_tensor=not actor_model_config.tie_word_embeddings, mesh=self.device_mesh
+        init_context = (
+            contextlib.nullcontext
+            if is_ll3da
+            else lambda: get_init_weight_context_manager(
+                use_meta_tensor=not actor_model_config.tie_word_embeddings, mesh=self.device_mesh
+            )
         )
 
         with init_context(), warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            if type(actor_model_config) in AutoModelForVision2Seq._model_mapping.keys():
+            if is_ll3da:
+                if role == "actor" and self.config.model.get("lora_rank", 0) > 0:
+                    raise ValueError("LL3DA SQA3D path uses full LLM fine-tuning; LoRA must stay disabled.")
+                from verl.models.ll3da_adapter import build_ll3da_adapter
+
+                actor_module = build_ll3da_adapter(
+                    model_config=self.config.model,
+                    llm_model_path=local_path,
+                    actor_model_config=actor_model_config,
+                    torch_dtype=torch_dtype,
+                )
+            elif type(actor_model_config) in AutoModelForVision2Seq._model_mapping.keys():
                 actor_module_class = AutoModelForVision2Seq
             elif type(actor_model_config) in AutoModelForImageTextToText._model_mapping.keys():
                 actor_module_class = AutoModelForImageTextToText
             else:
                 actor_module_class = AutoModelForCausalLM
+
+            if not is_ll3da:
+                actor_module = actor_module_class.from_pretrained(
+                    pretrained_model_name_or_path=local_path,
+                    torch_dtype=torch_dtype,
+                    config=actor_model_config,
+                    trust_remote_code=trust_remote_code,
+                    **({} if actor_model_config.model_type == "pointllm" else {"attn_implementation": "eager"}),
+                )
 
             # model_init_kwargs = dict(attn_implementation="eager")
             # if re.match("internvl", actor_model_config.model_type, re.IGNORECASE):
@@ -223,15 +269,11 @@ class ActorRolloutRefWorker(Worker):
             #         model_init_kwargs.pop("attn_implementation")
             #         model_init_kwargs["use_flash_attn"] = True
 
-            actor_module = actor_module_class.from_pretrained(
-                pretrained_model_name_or_path=local_path,
-                torch_dtype=torch_dtype,
-                config=actor_model_config,
-                attn_implementation="eager",
-                trust_remote_code=trust_remote_code,
-            )
+            if actor_model_config.model_type == "pointllm":
+                actor_module.initialize_tokenizer_point_backbone_config_wo_embedding(self.tokenizer)
 
             use_orig_params = False
+            ignored_states = None
             frozen_vision_tower = False
 
             if re.match("internvl", actor_module.config.model_type):
@@ -247,6 +289,11 @@ class ActorRolloutRefWorker(Worker):
                             param.requires_grad = False
             if frozen_vision_tower:
                 use_orig_params = True
+            if is_ll3da:
+                ignored_states = [param for param in actor_module.parameters() if not param.requires_grad]
+                if self.rank == 0:
+                    ignored_count = sum(param.numel() for param in ignored_states)
+                    print(f"LL3DA FSDP ignored frozen params: {ignored_count / 1e6:.2f}M")
 
             if use_remove_padding or self.ulysses_sequence_parallel_size > 1:
                 from verl.models.transformers.monkey_patch import apply_monkey_patch
@@ -261,6 +308,28 @@ class ActorRolloutRefWorker(Worker):
 
             # some parameters may not in torch_dtype. TODO(zhangchi.usc1992) remove this after we switch to fsdp2
             actor_module.to(torch_dtype)
+            if is_ll3da:
+                actor_module.to(device=torch.cuda.current_device())
+
+            if role == "actor" and self.config.model.get("lora_rank", 0) <= 0 and not is_ll3da:
+                for param in actor_module.parameters():
+                    param.requires_grad_(True)
+
+            if role == "actor" and self.config.model.get("lora_rank", 0) > 0 and not is_ll3da:
+                from peft import LoraConfig, TaskType, get_peft_model
+
+                actor_module.enable_input_require_grads()
+                lora_config = LoraConfig(
+                    task_type=TaskType.CAUSAL_LM,
+                    r=self.config.model.lora_rank,
+                    lora_alpha=self.config.model.lora_alpha,
+                    target_modules=_to_plain_config(self.config.model.target_modules),
+                    bias="none",
+                )
+                actor_module = get_peft_model(actor_module, lora_config)
+                actor_module.to(torch_dtype)
+                if self.rank == 0:
+                    actor_module.print_trainable_parameters()
 
             if enable_gradient_checkpointing:
                 actor_module.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
@@ -281,10 +350,22 @@ class ActorRolloutRefWorker(Worker):
             param_dtype = torch.bfloat16
             reduce_dtype = torch.float32
             buffer_dtype = torch.float32
+        if getattr(getattr(actor_module, "config", None), "model_type", None) == "pointllm":
+            buffer_dtype = param_dtype
+            if role == "ref":
+                param_dtype = torch.float32
+                reduce_dtype = torch.float32
+                buffer_dtype = torch.float32
+        if getattr(getattr(actor_module, "config", None), "model_type", None) == "ll3da":
+            buffer_dtype = param_dtype
 
         mixed_precision = MixedPrecision(param_dtype=param_dtype, reduce_dtype=reduce_dtype, buffer_dtype=buffer_dtype)
 
-        auto_wrap_policy = get_fsdp_wrap_policy(module=actor_module, config=fsdp_config.get("wrap_policy", None))
+        auto_wrap_policy = get_fsdp_wrap_policy(
+            module=actor_module,
+            config=fsdp_config.get("wrap_policy", None),
+            is_lora=role == "actor" and self.config.model.get("lora_rank", 0) > 0,
+        )
 
         if self._is_rollout and self.config.rollout.name == "hf":
             # TODO(zhangchi.usc1992, shengguangming) fix me. Current, auto_wrap_policy causes HFRollout to hang in Gemma
@@ -303,8 +384,9 @@ class ActorRolloutRefWorker(Worker):
             actor_module,
             cpu_offload=cpu_offload,
             param_init_fn=init_fn,
-            use_orig_params=False,
+            use_orig_params=use_orig_params,
             auto_wrap_policy=auto_wrap_policy,
+            ignored_states=ignored_states,
             device_id=torch.cuda.current_device(),
             sharding_strategy=sharding_strategy,  # zero3
             mixed_precision=mixed_precision,

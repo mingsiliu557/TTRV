@@ -16,7 +16,11 @@ FSDP PPO Trainer with Ray-based single controller.
 This trainer supports model-agonistic model initialization with huggingface
 """
 
+import faulthandler
+import json
 import os
+import signal
+import time
 import uuid
 from collections import defaultdict
 from contextlib import contextmanager
@@ -50,6 +54,7 @@ from verl.trainer.ppo.metric_utils import (
 )
 from verl.utils.checkpoint.checkpoint_manager import find_latest_ckpt_path
 from verl.utils.dataset.rl_dataset import RLHFDataset, collate_fn
+from verl.utils.reward_score.sqa3d_ttrv import summarize_sqa3d_validation
 from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from verl.utils.tracking import ValidationGenerationsLogger
 
@@ -283,6 +288,10 @@ class RayPPOTrainer:
         self.config = config
         self.reward_fn = reward_fn
         self.val_reward_fn = val_reward_fn
+        try:
+            faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
+        except Exception as exc:
+            print(f"Failed to register faulthandler SIGUSR1 hook: {exc}")
 
         self.hybrid_engine = config.actor_rollout_ref.hybrid_engine
         assert self.hybrid_engine, "Currently, only support hybrid engine"
@@ -315,12 +324,28 @@ class RayPPOTrainer:
         else:
             raise NotImplementedError
         
+        self.use_vote_sampling = False
         if self.config.reward_model.reward_manager == "ttrl":
             self.use_ttrl = True
             self.n_samples_per_prompt = self.config.reward_model.reward_kwargs.n_samples_per_prompt
             self.n_votes_per_prompt = self.config.reward_model.reward_kwargs.n_votes_per_prompt
         else:
             self.use_ttrl = False
+            reward_kwargs = self.config.reward_model.get("reward_kwargs", {})
+            self.n_samples_per_prompt = int(
+                reward_kwargs.get("n_samples_per_prompt", self.config.actor_rollout_ref.rollout.n)
+            )
+            self.n_votes_per_prompt = int(reward_kwargs.get("n_votes_per_prompt", self.n_samples_per_prompt))
+            self.use_vote_sampling = (
+                bool(self.config.actor_rollout_ref.rollout.get("do_vote", False))
+                and self.n_votes_per_prompt > self.n_samples_per_prompt
+            )
+            if self.use_vote_sampling:
+                print(
+                    "Vote sampling enabled for batch reward: "
+                    f"n_votes_per_prompt={self.n_votes_per_prompt}, "
+                    f"n_samples_per_prompt={self.n_samples_per_prompt}"
+                )
 
         self._validate_config()
         self._create_dataloader()
@@ -509,7 +534,7 @@ class RayPPOTrainer:
             dataset=self.val_dataset,
             # Validation datasets are sent to inference engines as a whole batch,
             # which will schedule the memory themselves.
-            batch_size=20, # double check this ==> reduce it to 400
+            batch_size=self.config.data.get("val_batch_size", 20) or 20,
             num_workers=8,
             shuffle=False,
             drop_last=False,
@@ -563,10 +588,187 @@ class RayPPOTrainer:
         # Log to each configured logger
         self.validation_generations_logger.log(self.config.trainer.logger, samples, self.global_steps)
 
+    @staticmethod
+    def _copy_point_clouds_to_generation_batch(source_batch: DataProto, generation_batch: DataProto):
+        for key in ("point_clouds", "box_query", "box_mask", "click_query", "click_mask"):
+            if key in source_batch.batch.keys():
+                generation_batch.batch[key] = source_batch.batch[key]
+
+    @staticmethod
+    def _build_validation_group_keys(batch: DataProto, fallback_inputs: list[str]):
+        extra_infos = batch.non_tensor_batch.get("extra_info", None)
+        if extra_infos is None:
+            return None
+
+        data_sources = batch.non_tensor_batch.get("data_source", None)
+        group_keys = []
+        use_group_keys = False
+        for i, extra in enumerate(extra_infos):
+            data_source = str(data_sources[i]) if data_sources is not None else "unknown"
+            if isinstance(extra, dict) and ("pc_path" in extra or data_source == "modelnet40_freeform"):
+                index = extra.get("index", i)
+                group_keys.append(f"{data_source}::{index}")
+                use_group_keys = True
+            else:
+                group_keys.append(fallback_inputs[i])
+
+        return group_keys if use_group_keys else None
+
+    @staticmethod
+    def _maybe_add_sqa3d_validation_metrics(
+        metric_dict: dict,
+        data_sources: np.ndarray,
+        group_keys: list[str],
+        reward_extra_infos_dict: dict[str, list],
+    ):
+        if not group_keys:
+            return
+        metric_dict.update(
+            summarize_sqa3d_validation(
+                data_sources=data_sources.tolist(),
+                group_keys=group_keys,
+                infos_dict=reward_extra_infos_dict,
+            )
+        )
+
+    @staticmethod
+    def _json_safe(value):
+        if isinstance(value, dict):
+            return {str(key): RayPPOTrainer._json_safe(val) for key, val in value.items()}
+        if isinstance(value, np.ndarray):
+            return RayPPOTrainer._json_safe(value.tolist())
+        if isinstance(value, (list, tuple)):
+            return [RayPPOTrainer._json_safe(item) for item in value]
+        if hasattr(value, "detach"):
+            return RayPPOTrainer._json_safe(value.detach().cpu().tolist())
+        if hasattr(value, "item"):
+            try:
+                return value.item()
+            except Exception:
+                return str(value)
+        return value
+
+    @staticmethod
+    def _batch_item(values, index, default=None):
+        if values is None:
+            return default
+        try:
+            return values[index]
+        except Exception:
+            return default
+
+    def _validation_predictions_path(self, step: int) -> str:
+        output_dir = self.config.trainer.get("validation_predictions_dir", None)
+        if not output_dir:
+            default_local_dir = str(self.config.trainer.get("default_local_dir", ""))
+            output_dir = os.path.dirname(default_local_dir.rstrip(os.sep)) if default_local_dir else os.getcwd()
+        os.makedirs(output_dir, exist_ok=True)
+        return os.path.join(output_dir, f"validation_predictions_step{step}.jsonl")
+
+    def _record_validation_predictions(
+        self,
+        *,
+        prediction_fp,
+        print_predictions: bool,
+        step: int,
+        val_batch_idx: int,
+        base_index: int,
+        test_batch: DataProto,
+        input_texts: list[str],
+        output_texts: list[str],
+        scores: list[float],
+        reward_extra_info: dict[str, list],
+    ):
+        n_items = len(output_texts)
+        extra_infos = test_batch.non_tensor_batch.get("extra_info", [None] * n_items)
+        data_sources = test_batch.non_tensor_batch.get("data_source", [None] * n_items)
+        reward_models = test_batch.non_tensor_batch.get("reward_model", [None] * n_items)
+
+        response_cap = None
+        response_lengths = [None] * n_items
+        response_ids_cpu = None
+        if test_batch.batch is not None and "responses" in test_batch.batch.keys():
+            response_ids_cpu = test_batch.batch["responses"].detach().cpu()
+            response_cap = int(response_ids_cpu.shape[-1])
+            if "attention_mask" in test_batch.batch.keys() and "prompts" in test_batch.batch.keys():
+                prompt_len = int(test_batch.batch["prompts"].shape[-1])
+                response_mask = test_batch.batch["attention_mask"][:, prompt_len : prompt_len + response_cap]
+                response_lengths = response_mask.sum(dim=-1).detach().cpu().tolist()
+
+        tracked_reward_keys = (
+            "pred",
+            "freeform_pred",
+            "closed_pred",
+            "score",
+            "acc",
+            "official_acc",
+            "strict_acc",
+            "closed_acc",
+            "unknown",
+            "closed_unknown",
+            "blank",
+            "freq",
+            "entropy",
+            "raw_entropy",
+            "answer_type",
+        )
+        for i in range(n_items):
+            extra = self._batch_item(extra_infos, i, {}) or {}
+            if not isinstance(extra, dict):
+                extra = {}
+            reward_model = self._batch_item(reward_models, i, {}) or {}
+            if not isinstance(reward_model, dict):
+                reward_model = {}
+            response_token_len = response_lengths[i]
+            ended_with_eos = None
+            if response_ids_cpu is not None and response_token_len:
+                last_token_idx = min(int(response_token_len) - 1, response_cap - 1)
+                ended_with_eos = int(response_ids_cpu[i, last_token_idx].item()) == self.tokenizer.eos_token_id
+            record = {
+                "step": int(step),
+                "validation_index": int(base_index + i),
+                "batch_index": int(val_batch_idx),
+                "row_in_batch": int(i),
+                "data_source": self._json_safe(self._batch_item(data_sources, i)),
+                "index": self._json_safe(extra.get("index")),
+                "question_id": self._json_safe(extra.get("question_id")),
+                "scene_id": self._json_safe(extra.get("scene_id")),
+                "question_type": self._json_safe(extra.get("question_type")),
+                "prompt": input_texts[i],
+                "response": output_texts[i],
+                "ground_truth": self._json_safe(reward_model.get("ground_truth")),
+                "gt_answers": self._json_safe(extra.get("answers")),
+                "reward": float(scores[i]) if i < len(scores) else None,
+                "response_token_len": int(response_token_len) if response_token_len is not None else None,
+                "max_response_length": response_cap,
+                "ended_with_eos": ended_with_eos,
+                "hit_max_response_length": bool(
+                    response_cap is not None
+                    and response_token_len is not None
+                    and response_token_len >= response_cap
+                    and not ended_with_eos
+                ),
+            }
+            for key in tracked_reward_keys:
+                values = reward_extra_info.get(key)
+                record[key] = self._json_safe(self._batch_item(values, i))
+
+            line = json.dumps(record, ensure_ascii=False)
+            if prediction_fp is not None:
+                prediction_fp.write(line + "\n")
+            if print_predictions:
+                print(f"[validation_prediction] {line}", flush=True)
+
+        if prediction_fp is not None:
+            prediction_fp.flush()
 
     def _validate_try(self):
         data_source_lst = []
         reward_extra_infos_dict: dict[str, list] = defaultdict(list)
+        metric_group_keys = []
+        use_metric_group_keys = False
+        if hasattr(self.val_reward_fn, "reset_examine_counter"):
+            self.val_reward_fn.reset_examine_counter()
 
         # Lists to collect samples for the table
         sample_inputs = []
@@ -574,8 +776,28 @@ class RayPPOTrainer:
         # sample_outputs = []
         sample_scores = []
 
-        for test_data in self.val_dataloader:
+        log_validation_batches = self.config.trainer.get("log_validation_batches", False)
+        dump_validation_predictions = self.config.trainer.get("dump_validation_predictions", False)
+        print_validation_predictions = self.config.trainer.get("print_validation_predictions", False)
+        prediction_fp = None
+        validation_prediction_count = 0
+        if dump_validation_predictions:
+            prediction_path = self._validation_predictions_path(step=self.global_steps)
+            prediction_fp = open(prediction_path, "w", encoding="utf-8")
+            print(f"[validation_predictions] step={self.global_steps} path={prediction_path}", flush=True)
+        val_total = len(self.val_dataloader) if hasattr(self.val_dataloader, "__len__") else None
+        val_start_time = time.perf_counter()
+
+        for val_batch_idx, test_data in enumerate(self.val_dataloader):
+            batch_start_time = time.perf_counter()
             test_batch = DataProto.from_single_dict(test_data)
+            if log_validation_batches:
+                batch_size = test_batch.batch.batch_size[0] if test_batch.batch is not None else len(test_batch)
+                total_text = f"/{val_total}" if val_total is not None else ""
+                print(
+                    f"[validation] batch {val_batch_idx + 1}{total_text} "
+                    f"loaded batch_size={batch_size} elapsed={time.perf_counter() - val_start_time:.2f}s"
+                )
 
             # repeat test batch
             test_batch = test_batch.repeat(
@@ -584,6 +806,8 @@ class RayPPOTrainer:
 
             # we only do validation on rule-based rm
             if self.config.reward_model.enable and test_batch[0].non_tensor_batch["reward_model"]["style"] == "model":
+                if prediction_fp is not None:
+                    prediction_fp.close()
                 return {}
 
             # Store original inputs
@@ -591,6 +815,12 @@ class RayPPOTrainer:
             # TODO: Can we keep special tokens except for padding tokens?
             input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
             sample_inputs.extend(input_texts)
+            batch_group_keys = self._build_validation_group_keys(test_batch, input_texts)
+            if batch_group_keys is not None:
+                use_metric_group_keys = True
+                metric_group_keys.extend(batch_group_keys)
+            else:
+                metric_group_keys.extend(input_texts)
 
             if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
                 test_gen_batch = test_batch.pop(
@@ -602,15 +832,28 @@ class RayPPOTrainer:
                     batch_keys=["input_ids", "attention_mask", "position_ids"],
                     non_tensor_batch_keys=["raw_prompt_ids"],
                 )
+            self._copy_point_clouds_to_generation_batch(test_batch, test_gen_batch)
 
             test_gen_batch.meta_info = {
                 "eos_token_id": self.tokenizer.eos_token_id,
                 "pad_token_id": self.tokenizer.pad_token_id,
                 "recompute_log_prob": False,
                 "do_sample": self.config.actor_rollout_ref.rollout.val_kwargs.do_sample,
+                "temperature": self.config.actor_rollout_ref.rollout.val_kwargs.temperature,
+                "top_p": self.config.actor_rollout_ref.rollout.val_kwargs.top_p,
+                "top_k": self.config.actor_rollout_ref.rollout.val_kwargs.get(
+                    "top_k", self.config.actor_rollout_ref.rollout.get("top_k", 0)
+                ),
+                "response_length": self.config.actor_rollout_ref.rollout.val_kwargs.get(
+                    "response_length",
+                    self.config.actor_rollout_ref.rollout.get(
+                        "response_length", self.config.data.get("max_response_length", None)
+                    ),
+                ),
                 "validate": True,
             }
-            print(f"test_gen_batch meta info: {test_gen_batch.meta_info}")
+            if self.config.trainer.get("log_validation_batches", False):
+                print(f"test_gen_batch meta info: {test_gen_batch.meta_info}")
 
             # pad to be divisible by dp_size
             test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
@@ -618,7 +861,8 @@ class RayPPOTrainer:
 
             # unpad
             test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=pad_size)
-            print("validation generation end")
+            if self.config.trainer.get("log_validation_batches", False):
+                print("validation generation end")
 
             # Store generated outputs
             # output_ids = test_output_gen_batch.batch["responses"]
@@ -647,7 +891,12 @@ class RayPPOTrainer:
 
         data_sources = np.concatenate(data_source_lst, axis=0)
 
-        data_src2var2metric2val = process_validation_metrics(data_sources, sample_inputs, reward_extra_infos_dict)
+        data_src2var2metric2val = process_validation_metrics(
+            data_sources,
+            sample_inputs,
+            reward_extra_infos_dict,
+            group_keys=metric_group_keys if use_metric_group_keys else None,
+        )
         metric_dict = {}
         for data_source, var2metric2val in data_src2var2metric2val.items():
             core_var = "acc" if "acc" in var2metric2val else "reward"
@@ -664,6 +913,13 @@ class RayPPOTrainer:
                         metric_sec = "val-aux"
                     pfx = f"{metric_sec}/{data_source}/{var_name}/{metric_name}"
                     metric_dict[pfx] = metric_val
+
+        self._maybe_add_sqa3d_validation_metrics(
+            metric_dict=metric_dict,
+            data_sources=data_sources,
+            group_keys=metric_group_keys if use_metric_group_keys else [],
+            reward_extra_infos_dict=reward_extra_infos_dict,
+        )
 
         # add ttrl metrics
         if self.use_ttrl and "ttrl_info" in result:
@@ -675,14 +931,38 @@ class RayPPOTrainer:
     def _validate(self):
         data_source_lst = []
         reward_extra_infos_dict: dict[str, list] = defaultdict(list)
+        metric_group_keys = []
+        use_metric_group_keys = False
+        if hasattr(self.val_reward_fn, "reset_examine_counter"):
+            self.val_reward_fn.reset_examine_counter()
 
         # Lists to collect samples for the table
         sample_inputs = []
         sample_outputs = []
         sample_scores = []
 
-        for test_data in self.val_dataloader:
+        log_validation_batches = self.config.trainer.get("log_validation_batches", False)
+        dump_validation_predictions = self.config.trainer.get("dump_validation_predictions", False)
+        print_validation_predictions = self.config.trainer.get("print_validation_predictions", False)
+        prediction_fp = None
+        validation_prediction_count = 0
+        if dump_validation_predictions:
+            prediction_path = self._validation_predictions_path(step=self.global_steps)
+            prediction_fp = open(prediction_path, "w", encoding="utf-8")
+            print(f"[validation_predictions] step={self.global_steps} path={prediction_path}", flush=True)
+        val_total = len(self.val_dataloader) if hasattr(self.val_dataloader, "__len__") else None
+        val_start_time = time.perf_counter()
+
+        for val_batch_idx, test_data in enumerate(self.val_dataloader):
+            batch_start_time = time.perf_counter()
             test_batch = DataProto.from_single_dict(test_data)
+            if log_validation_batches:
+                batch_size = test_batch.batch.batch_size[0] if test_batch.batch is not None else len(test_batch)
+                total_text = f"/{val_total}" if val_total is not None else ""
+                print(
+                    f"[validation] batch {val_batch_idx + 1}{total_text} "
+                    f"loaded batch_size={batch_size} elapsed={time.perf_counter() - val_start_time:.2f}s"
+                )
 
             # repeat test batch
             test_batch = test_batch.repeat(
@@ -691,6 +971,8 @@ class RayPPOTrainer:
 
             # we only do validation on rule-based rm
             if self.config.reward_model.enable and test_batch[0].non_tensor_batch["reward_model"]["style"] == "model":
+                if prediction_fp is not None:
+                    prediction_fp.close()
                 return {}
 
             # Store original inputs
@@ -698,6 +980,12 @@ class RayPPOTrainer:
             # TODO: Can we keep special tokens except for padding tokens?
             input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
             sample_inputs.extend(input_texts)
+            batch_group_keys = self._build_validation_group_keys(test_batch, input_texts)
+            if batch_group_keys is not None:
+                use_metric_group_keys = True
+                metric_group_keys.extend(batch_group_keys)
+            else:
+                metric_group_keys.extend(input_texts)
 
             if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
                 test_gen_batch = test_batch.pop(
@@ -709,43 +997,97 @@ class RayPPOTrainer:
                     batch_keys=["input_ids", "attention_mask", "position_ids"],
                     non_tensor_batch_keys=["raw_prompt_ids"],
                 )
+            self._copy_point_clouds_to_generation_batch(test_batch, test_gen_batch)
 
             test_gen_batch.meta_info = {
                 "eos_token_id": self.tokenizer.eos_token_id,
                 "pad_token_id": self.tokenizer.pad_token_id,
                 "recompute_log_prob": False,
                 "do_sample": self.config.actor_rollout_ref.rollout.val_kwargs.do_sample,
+                "temperature": self.config.actor_rollout_ref.rollout.val_kwargs.temperature,
+                "top_p": self.config.actor_rollout_ref.rollout.val_kwargs.top_p,
+                "top_k": self.config.actor_rollout_ref.rollout.val_kwargs.get(
+                    "top_k", self.config.actor_rollout_ref.rollout.get("top_k", 0)
+                ),
+                "response_length": self.config.actor_rollout_ref.rollout.val_kwargs.get(
+                    "response_length",
+                    self.config.actor_rollout_ref.rollout.get(
+                        "response_length", self.config.data.get("max_response_length", None)
+                    ),
+                ),
                 "validate": True,
             }
-            print(f"test_gen_batch meta info: {test_gen_batch.meta_info}")
+            if log_validation_batches:
+                print(f"test_gen_batch meta info: {test_gen_batch.meta_info}")
 
             # pad to be divisible by dp_size
+            gen_start_time = time.perf_counter()
             test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
             test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(test_gen_batch_padded)
 
             # unpad
             test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=pad_size)
-            print("validation generation end")
+            if log_validation_batches:
+                print(
+                    f"[validation] batch {val_batch_idx + 1}{total_text} "
+                    f"generation_sec={time.perf_counter() - gen_start_time:.2f}"
+                )
 
             # Store generated outputs
+            decode_start_time = time.perf_counter()
             output_ids = test_output_gen_batch.batch["responses"]
             output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
             sample_outputs.extend(output_texts)
+            if log_validation_batches:
+                print(
+                    f"[validation] batch {val_batch_idx + 1}{total_text} "
+                    f"decode_sec={time.perf_counter() - decode_start_time:.2f}"
+                )
 
             test_batch = test_batch.union(test_output_gen_batch)
 
             # evaluate using reward_function
+            reward_start_time = time.perf_counter()
             result = self.val_reward_fn(test_batch, return_dict=True)
             reward_tensor = result["reward_tensor"]
             scores = reward_tensor.sum(-1).cpu().tolist()
             sample_scores.extend(scores)
+            if log_validation_batches:
+                print(
+                    f"[validation] batch {val_batch_idx + 1}{total_text} "
+                    f"reward_sec={time.perf_counter() - reward_start_time:.2f} "
+                    f"batch_total_sec={time.perf_counter() - batch_start_time:.2f}"
+                )
 
             reward_extra_infos_dict["reward"].extend(scores)
-            if "reward_extra_info" in result:
-                for key, lst in result["reward_extra_info"].items():
+            batch_reward_extra_info = result.get("reward_extra_info", {})
+            if batch_reward_extra_info:
+                for key, lst in batch_reward_extra_info.items():
                     reward_extra_infos_dict[key].extend(lst)
+            if dump_validation_predictions or print_validation_predictions:
+                self._record_validation_predictions(
+                    prediction_fp=prediction_fp,
+                    print_predictions=print_validation_predictions,
+                    step=self.global_steps,
+                    val_batch_idx=val_batch_idx,
+                    base_index=validation_prediction_count,
+                    test_batch=test_batch,
+                    input_texts=input_texts,
+                    output_texts=output_texts,
+                    scores=scores,
+                    reward_extra_info=batch_reward_extra_info,
+                )
+                validation_prediction_count += len(output_texts)
 
             data_source_lst.append(test_batch.non_tensor_batch.get("data_source", ["unknown"] * reward_tensor.shape[0]))
+
+        if prediction_fp is not None:
+            prediction_fp.close()
+            print(
+                f"[validation_predictions] step={self.global_steps} "
+                f"records={validation_prediction_count}",
+                flush=True,
+            )
 
         self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
 
@@ -754,7 +1096,12 @@ class RayPPOTrainer:
 
         data_sources = np.concatenate(data_source_lst, axis=0)
 
-        data_src2var2metric2val = process_validation_metrics(data_sources, sample_inputs, reward_extra_infos_dict)
+        data_src2var2metric2val = process_validation_metrics(
+            data_sources,
+            sample_inputs,
+            reward_extra_infos_dict,
+            group_keys=metric_group_keys if use_metric_group_keys else None,
+        )
         metric_dict = {}
         for data_source, var2metric2val in data_src2var2metric2val.items():
             core_var = "acc" if "acc" in var2metric2val else "reward"
@@ -771,6 +1118,13 @@ class RayPPOTrainer:
                         metric_sec = "val-aux"
                     pfx = f"{metric_sec}/{data_source}/{var_name}/{metric_name}"
                     metric_dict[pfx] = metric_val
+
+        self._maybe_add_sqa3d_validation_metrics(
+            metric_dict=metric_dict,
+            data_sources=data_sources,
+            group_keys=metric_group_keys if use_metric_group_keys else [],
+            reward_extra_infos_dict=reward_extra_infos_dict,
+        )
 
         # add ttrl metrics
         if self.use_ttrl and "ttrl_info" in result:
@@ -988,16 +1342,75 @@ class RayPPOTrainer:
         )
         metrics.update(global_balance_stats)
 
-    def _select_top_k_per_prompt(self, data, n_votes_per_prompt, n_samples_per_prompt):
-        assert len(data) % n_votes_per_prompt == 0, "data length must be divisible by n_votes_per_prompt"
-        num_prompts = len(data) // n_votes_per_prompt
-
+    def _select_indices_per_prompt(self, data_len, n_votes_per_prompt, n_samples_per_prompt):
+        assert data_len % n_votes_per_prompt == 0, "data length must be divisible by n_votes_per_prompt"
+        num_prompts = data_len // n_votes_per_prompt
         selected_indices = []
         for i in range(num_prompts):
             start = i * n_votes_per_prompt
             selected_indices.extend(range(start, start + n_samples_per_prompt))
+        return selected_indices
 
+    def _select_top_k_per_prompt(self, data, n_votes_per_prompt, n_samples_per_prompt):
+        selected_indices = self._select_indices_per_prompt(
+            len(data), n_votes_per_prompt, n_samples_per_prompt
+        )
         return data[selected_indices]
+
+    def _select_reward_extra_infos(self, reward_extra_infos_dict, selected_indices):
+        selected = {}
+        for key, values in reward_extra_infos_dict.items():
+            if len(values) == 0:
+                selected[key] = values
+            elif len(values) == max(selected_indices) + 1 or len(values) > max(selected_indices):
+                selected[key] = [values[idx] for idx in selected_indices]
+            else:
+                selected[key] = values
+        return selected
+
+    def _add_sqa3d_train_reward_metrics(self, metrics, reward_extra_infos_dict):
+        if not reward_extra_infos_dict or "freq" not in reward_extra_infos_dict:
+            return
+
+        def numeric_values(key):
+            values = reward_extra_infos_dict.get(key, [])
+            out = []
+            for value in values:
+                try:
+                    out.append(float(value))
+                except (TypeError, ValueError):
+                    pass
+            return out
+
+        def mean(key):
+            values = numeric_values(key)
+            return float(np.mean(values)) if values else None
+
+        scalar_metrics = {
+            "train/sqa3d/freq_mean": mean("freq"),
+            "train/sqa3d/entropy_mean": mean("entropy"),
+            "train/sqa3d/raw_entropy_mean": mean("raw_entropy"),
+            "train/sqa3d/unknown_rate": mean("unknown"),
+            "train/sqa3d/blank_rate": mean("blank"),
+            "train/sqa3d/em_mean": mean("acc"),
+            "train/sqa3d/pass@votes": mean("group_pass"),
+            "train/sqa3d/unique_pred_ratio": mean("unique_pred_ratio"),
+            "train/sqa3d/group_unknown_rate": mean("group_unknown_rate"),
+            "train/sqa3d/group_blank_rate": mean("group_blank_rate"),
+            "train/sqa3d/group_em_mean": mean("group_em_mean"),
+        }
+        freq_values = numeric_values("freq")
+        if freq_values:
+            scalar_metrics["train/sqa3d/freq_max"] = float(np.max(freq_values))
+            scalar_metrics["train/sqa3d/freq_min"] = float(np.min(freq_values))
+        unique_counts = numeric_values("unique_pred_count")
+        if unique_counts:
+            scalar_metrics["train/sqa3d/unique_pred_count_mean"] = float(np.mean(unique_counts))
+        group_sizes = numeric_values("group_size")
+        if group_sizes:
+            scalar_metrics["train/sqa3d/group_size_mean"] = float(np.mean(group_sizes))
+
+        metrics.update({key: value for key, value in scalar_metrics.items() if value is not None})
 
     def fit(self):
         """
@@ -1045,7 +1458,7 @@ class RayPPOTrainer:
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
 
                 batch.meta_info["do_vote"] = False
-                if self.use_ttrl:
+                if self.use_ttrl or self.use_vote_sampling:
                     self.config.actor_rollout_ref.rollout.n = self.n_votes_per_prompt
                     batch.meta_info["do_vote"] = True
 
@@ -1062,6 +1475,7 @@ class RayPPOTrainer:
                         non_tensor_batch_keys=["raw_prompt_ids"],
                         meta_info_keys=["do_vote"]
                     )
+                self._copy_point_clouds_to_generation_batch(batch, gen_batch)
 
                 is_last_step = self.global_steps >= self.total_training_steps
 
@@ -1069,7 +1483,7 @@ class RayPPOTrainer:
                     # generate a batch
                     with _timer("gen", timing_raw):
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
-                        if self.use_ttrl:
+                        if self.use_ttrl or self.use_vote_sampling:
                             assert len(gen_batch_output) == len(batch) * self.n_votes_per_prompt
                         else:
                             pass
@@ -1136,7 +1550,7 @@ class RayPPOTrainer:
                         # compute scores. Support both model and function-based.
                         # We first compute the scores using reward model. Then, we call reward_fn to combine
                         # the results from reward model and rule-based results.
-                        if self.use_ttrl:
+                        if self.use_ttrl or self.use_vote_sampling:
                             sorted_indices = sorted(range(len(batch)), key=lambda i: batch[i].non_tensor_batch["extra_info"]["index"])
                             batch = batch[sorted_indices]
                         if self.use_rm:
@@ -1150,6 +1564,7 @@ class RayPPOTrainer:
                             reward_result = self.reward_fn(batch, return_dict=True)
                             reward_tensor = reward_result["reward_tensor"]
                             reward_extra_infos_dict = reward_result["reward_extra_info"]
+                            self._add_sqa3d_train_reward_metrics(metrics, reward_extra_infos_dict)
                             if self.use_ttrl:
                                 from copy import deepcopy
                                 ttrl_metrics = reward_result["ttrl_info"]
@@ -1170,6 +1585,22 @@ class RayPPOTrainer:
                                     loss_mat=batch.batch["entropys"], loss_mask=batch.batch["response_mask"], loss_agg_mode=loss_agg_mode
                                 )
                                 metrics.update({"train/post_entropy": post_entropy_loss.detach().item()})
+                            elif self.use_vote_sampling:
+                                selected_indices = self._select_indices_per_prompt(
+                                    len(batch), self.n_votes_per_prompt, self.n_samples_per_prompt
+                                )
+                                batch = batch[selected_indices]
+                                reward_tensor = reward_tensor[selected_indices]
+                                reward_extra_infos_dict = self._select_reward_extra_infos(
+                                    reward_extra_infos_dict, selected_indices
+                                )
+                                self.config.actor_rollout_ref.rollout.n = self.n_samples_per_prompt
+                                metrics.update(
+                                    {
+                                        "train/vote_sampling/n_votes": float(self.n_votes_per_prompt),
+                                        "train/vote_sampling/n_samples": float(self.n_samples_per_prompt),
+                                    }
+                                )
                                 
                         except Exception as e:
                             print(f"Error in reward_fn: {e}")
@@ -1178,10 +1609,11 @@ class RayPPOTrainer:
 
                         batch.batch["token_level_scores"] = reward_tensor
 
-                        if self.use_ttrl:
+                        if self.use_ttrl or self.use_vote_sampling:
                             self._balance_batch(batch, metrics=metrics)
 
-                        print(f"{list(reward_extra_infos_dict.keys())=}")
+                        if self.config.trainer.get("log_reward_extra_keys", False):
+                            print(f"{list(reward_extra_infos_dict.keys())=}")
                         if reward_extra_infos_dict:
                             batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
 

@@ -62,6 +62,12 @@ def hf_tokenizer(name_or_path, correct_pad_token=True, correct_gemma2=True, **kw
     trust_remote_code=kwargs.get("trust_remote_code", False)
     tokenizer = AutoTokenizer.from_pretrained(name_or_path, **kwargs)
     config = AutoConfig.from_pretrained(name_or_path, trust_remote_code=trust_remote_code)
+    if config.model_type == "pointllm":
+        point_tokens = [config.DEFAULT_POINT_PATCH_TOKEN]
+        if getattr(config, "mm_use_point_start_end", False):
+            point_tokens.extend([config.DEFAULT_POINT_START_TOKEN, config.DEFAULT_POINT_END_TOKEN])
+        tokenizer.add_tokens(point_tokens, special_tokens=True)
+        tokenizer.chat_template = """{{ bos_token }}A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions. {% for message in messages %}{% if message['role'] == 'user' %}{{ 'USER: ' + message['content'] + ' ' }}{% elif message['role'] == 'assistant' %}{{ 'ASSISTANT: ' + message['content'] + eos_token + ' ' }}{% endif %}{% endfor %}{% if add_generation_prompt %}{{ 'ASSISTANT:' }}{% endif %}"""
     if re.match("internvl", config.model_type):
         tokenizer.context_image_token = "<IMG_CONTEXT>"
         tokenizer.end_image_token="</img>"
@@ -70,6 +76,8 @@ def hf_tokenizer(name_or_path, correct_pad_token=True, correct_gemma2=True, **kw
         tokenizer.context_image_token_id = tokenizer.convert_tokens_to_ids(tokenizer.context_image_token) #for transformers >= 4.52.2
         print("tokenizer.context_image_token_id:", tokenizer.context_image_token_id)
         tokenizer.chat_template="""{% for message in messages %}{{'<|im_start|>' + message['role'] + ''}}{% if message['content'] is string %}{{ message['content'] }}{% else %}{% for content in message['content'] %}{% if content['type'] == 'image' %}{{ '<image>' }}{% elif content['type'] == 'video' %}{{ '<video>' }}{% elif content['type'] == 'text' %}{{ content['text'] }}{% endif %}{% endfor %}{% endif %}{{'<|im_end|>'}}{% endfor %}{% if add_generation_prompt %}{{'<|im_start|>assistant' }}{% endif %}"""
+    if tokenizer.chat_template is None:
+        tokenizer.chat_template = """{% for message in messages %}{{ message['content'] }}{% if not loop.last %}{{ '\n' }}{% endif %}{% endfor %}"""
     if correct_pad_token:
         set_pad_token_id(tokenizer)
     return tokenizer

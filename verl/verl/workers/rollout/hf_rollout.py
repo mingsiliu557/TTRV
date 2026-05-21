@@ -24,7 +24,6 @@ import torch.distributed
 from tensordict import TensorDict
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from transformers import GenerationConfig
 
 from verl import DataProto
 from verl.utils.torch_functional import get_response_mask
@@ -33,6 +32,8 @@ from .base import BaseRollout
 
 __all__ = ["HFRollout"]
 
+POINT_CLOUD_MODEL_KEYS = ("point_clouds", "box_query", "box_mask", "click_query", "click_mask")
+
 
 class HFRollout(BaseRollout):
     def __init__(self, module: nn.Module, config):
@@ -40,7 +41,11 @@ class HFRollout(BaseRollout):
         self.config = config
         self.module = module
 
-    def generate_sequences(self, prompts: DataProto) -> DataProto:
+    def generate_sequences(self, prompts: DataProto, n: int = None) -> DataProto:
+        if n is None:
+            n = 1 if prompts.meta_info.get("validate", False) else self.config.get("n", 1)
+        if n > 1:
+            prompts = prompts.repeat(repeat_times=n, interleave=True)
         batch_size = prompts.batch.batch_size[0]
         num_chunks = max(batch_size // self.config.get("micro_batch_size", batch_size), 1)
         batch_prompts = prompts.chunk(chunks=num_chunks)
@@ -60,6 +65,21 @@ class HFRollout(BaseRollout):
 
         batch_size = idx.size(0)
         prompt_length = idx.size(1)
+        generate_kwargs = {}
+        if "point_clouds" in prompts.batch:
+            try:
+                model_dtype = next(self.module.parameters()).dtype
+            except StopIteration:
+                model_dtype = torch.bfloat16
+            for key in POINT_CLOUD_MODEL_KEYS:
+                if key not in prompts.batch:
+                    continue
+                tensor = prompts.batch[key].to(device=idx.device)
+                if key == "point_clouds":
+                    tensor = tensor.to(dtype=model_dtype)
+                else:
+                    tensor = tensor.to(dtype=torch.float32)
+                generate_kwargs[key] = tensor
 
         self.module.eval()
         param_ctx = contextlib.nullcontext()
@@ -76,11 +96,15 @@ class HFRollout(BaseRollout):
 
         temperature = prompts.meta_info.get("temperature", self.config.temperature)
 
-        generation_config = GenerationConfig(temperature=temperature, top_p=top_p, top_k=top_k)
+        sampling_kwargs = {}
+        if do_sample:
+            sampling_kwargs.update(temperature=temperature, top_p=top_p, top_k=top_k)
 
         if isinstance(self.module, FSDP):
-            # recurse need to set to False according to https://github.com/pytorch/pytorch/issues/100069
-            param_ctx = FSDP.summon_full_params(self.module, writeback=False, recurse=False)
+            model_type = getattr(getattr(getattr(self.module, "module", None), "config", None), "model_type", None)
+            recurse = model_type in {"pointllm", "ll3da"}
+            # Point-cloud models use non-LLM backbones during generation, so recursively expose wrapped params.
+            param_ctx = FSDP.summon_full_params(self.module, writeback=False, recurse=recurse)
         with param_ctx:
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 output = self.module.generate(
@@ -91,18 +115,19 @@ class HFRollout(BaseRollout):
                     # max_length=max_length,
                     eos_token_id=eos_token_id,
                     pad_token_id=pad_token_id,
-                    generation_config=generation_config,
                     # renormalize_logits=True,
                     output_scores=False,  # this is potentially very large
                     return_dict_in_generate=True,
                     use_cache=True,
+                    **sampling_kwargs,
+                    **generate_kwargs,
                 )
         # TODO: filter out the seq with no answers like ds-chat
         seq = output.sequences
 
         # huggingface generate will stop generating when all the batch reaches [EOS].
         # We have to pad to response_length
-        sequence_length = prompt_length + self.config.response_length
+        sequence_length = prompt_length + response_length
         delta_length = sequence_length - seq.shape[1]
 
         if delta_length > 0:

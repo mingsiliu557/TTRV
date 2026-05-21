@@ -93,7 +93,8 @@ class TaskRunner:
 
         from verl.utils.fs import copy_to_local
 
-        pprint(OmegaConf.to_container(config, resolve=True))  # resolve=True will eval symbol values
+        if config.trainer.get("print_config", True):
+            pprint(OmegaConf.to_container(config, resolve=True))  # resolve=True will eval symbol values
         OmegaConf.resolve(config)
 
         # download the checkpoint from hdfs
@@ -102,6 +103,9 @@ class TaskRunner:
         # instantiate 
         
         from verl.utils import hf_processor, hf_tokenizer
+        from verl.utils.import_utils import import_external_libs
+
+        import_external_libs(config.actor_rollout_ref.model.get("external_lib", None))
 
         # trust_remote_code = config.data.get("trust_remote_code", False)
         trust_remote_code = True
@@ -189,6 +193,7 @@ class TaskRunner:
 
         compute_score = get_custom_reward_fn(config)
         reward_kwargs = dict(config.reward_model.get("reward_kwargs", {}))
+        val_num_examine = int(config.reward_model.get("val_num_examine", config.reward_model.get("num_examine", 1)))
         reward_fn = reward_manager_cls(
             tokenizer=tokenizer,
             num_examine=0,
@@ -200,11 +205,21 @@ class TaskRunner:
         # Note that we always use function-based RM for validation
         if reward_manager_name == "ttrl":
             val_reward_fn = reward_manager_cls(
-                tokenizer=tokenizer, num_examine=1, compute_score=compute_score, reward_fn_key=config.data.reward_fn_key, eval_n_samples=config.actor_rollout_ref.rollout.val_kwargs.n
+                tokenizer=tokenizer,
+                num_examine=val_num_examine,
+                compute_score=compute_score,
+                reward_fn_key=config.data.reward_fn_key,
+                eval_n_samples=config.actor_rollout_ref.rollout.val_kwargs.n,
+                **reward_kwargs,
             )
         else:
+            val_reward_kwargs = {**reward_kwargs, "reward_mode": "eval"}
             val_reward_fn = reward_manager_cls(
-                tokenizer=tokenizer, num_examine=1, compute_score=compute_score, reward_fn_key=config.data.reward_fn_key
+                tokenizer=tokenizer,
+                num_examine=val_num_examine,
+                compute_score=compute_score,
+                reward_fn_key=config.data.reward_fn_key,
+                **val_reward_kwargs,
             )
 
         resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)

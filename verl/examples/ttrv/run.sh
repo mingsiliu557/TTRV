@@ -4,6 +4,10 @@
 unset VLLM_ATTENTION_BACKEND
 export VLLM_USE_V1=1
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+VERL_DIR=$(cd "$SCRIPT_DIR/../.." && pwd)
+cd "$VERL_DIR"
+
 # ------------------------------------------------------------
 mkdir -p logs
 
@@ -12,10 +16,10 @@ TIME_TAG=$(date +%H%M%S)
 
 
 
-TASK="dtd_20"                       # put the dataset folder name here
-NO_GPU=8
-EPISODE=2
-ADVANTAGE="grpo"
+TASK="${TASK:-dtd_20}"                       # put the dataset folder name here
+NO_GPU="${NO_GPU:-$(python -c 'import torch; print(torch.cuda.device_count() or 1)' 2>/dev/null || echo 1)}"
+EPISODE="${EPISODE:-2}"
+ADVANTAGE="${ADVANTAGE:-grpo}"
 
 K=3
 MAX_PROMPT_LENGTH=7524
@@ -29,27 +33,34 @@ fi
 N=1 #greedy
 
 
-DATA_TRAIN_BATCH_SIZE=$NO_GPU
-N_VOTES_PER_PROMPT=32
-N_SAMPLES_PER_PROMPT=16
-MINI_BATCH_SIZE=1
-MICRO_BATCH_SIZE=2
+DATA_TRAIN_BATCH_SIZE="${DATA_TRAIN_BATCH_SIZE:-$NO_GPU}"
+N_VOTES_PER_PROMPT="${N_VOTES_PER_PROMPT:-32}"
+N_SAMPLES_PER_PROMPT="${N_SAMPLES_PER_PROMPT:-16}"
+MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-1}"
+MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-2}"
 
-DATA_LOCAL_DIR="path/to/data/verl/data" # change this to your local data directory
+DATA_LOCAL_DIR="${DATA_LOCAL_DIR:-$VERL_DIR/data}" # change this to your local data directory
 
-BACKBONE_PATH="OpenGVLab/InternVL3-2B"
+BACKBONE_PATH="${BACKBONE_PATH:-OpenGVLab/InternVL3-2B}"
+BACKBONE_SAFE=$(echo "$BACKBONE_PATH" | tr '/' '_')
 
-MODEL="${TASK}-${BACKBONE}"
+MODEL="${MODEL:-${TASK}-${BACKBONE_SAFE}}"
 EXPERIMENT="TTRL-Len@${K}k"
 
 WANDB_PROJECT="TTRL-verl"
 LOG_NAME="${DATE}-${EXPERIMENT}-${MODEL}-${ADVANTAGE}"
 OUTPUT_DIR="checkpoints/${WANDB_PROJECT}/${MODEL}/${DATE}/${EXPERIMENT}-${ADVANTAGE}-${TIME_TAG}"
 
-
-BACKBONE_SAFE=$(echo "$BACKBONE_PATH" | tr '/' '_')
 LOG_FILE="logs/${TASK}_${BACKBONE_SAFE}_${EPISODE}e_${DATE}_${TIME_TAG}.log" # log file name
 
+PREPROCESS_ARGS=("$TASK" "--data-dir" "$DATA_LOCAL_DIR")
+if [ -n "${IMAGE_ROOT:-}" ]; then
+  PREPROCESS_ARGS+=("--image-root" "$IMAGE_ROOT")
+fi
+
+if [ "${FORCE_PREPROCESS:-0}" = "1" ] || [ ! -f "$DATA_LOCAL_DIR/$TASK/train.parquet" ] || [ ! -f "$DATA_LOCAL_DIR/$TASK/test.parquet" ]; then
+  python "$VERL_DIR/data/preprocess.py" "${PREPROCESS_ARGS[@]}"
+fi
 
 # see do_sample
 # ------------------------------------------------------------
@@ -115,4 +126,3 @@ python -m verl.trainer.main_ppo \
   trainer.max_critic_ckpt_to_keep=0 \
   trainer.default_local_dir=$OUTPUT_DIR \
   trainer.total_epochs=$EPISODE "$@" 2>&1 | tee "$LOG_FILE"
-
