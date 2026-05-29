@@ -19,6 +19,7 @@ This trainer supports model-agonistic model initialization with huggingface
 import faulthandler
 import json
 import os
+import shutil
 import signal
 import time
 import uuid
@@ -54,6 +55,7 @@ from verl.trainer.ppo.metric_utils import (
 )
 from verl.utils.checkpoint.checkpoint_manager import find_latest_ckpt_path
 from verl.utils.dataset.rl_dataset import RLHFDataset, collate_fn
+from verl.utils.reward_score.physx_mcq_ttrv import summarize_physx_validation, summarize_prediction_records
 from verl.utils.reward_score.sqa3d_ttrv import summarize_sqa3d_validation
 from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from verl.utils.tracking import ValidationGenerationsLogger
@@ -595,6 +597,14 @@ class RayPPOTrainer:
                 generation_batch.batch[key] = source_batch.batch[key]
 
     @staticmethod
+    def _adopt_generation_point_clouds(target_batch: DataProto, generation_output: DataProto):
+        if target_batch.batch is None or generation_output.batch is None:
+            return
+        for key in ("point_clouds", "box_query", "box_mask", "click_query", "click_mask"):
+            if key in target_batch.batch.keys() and key in generation_output.batch.keys():
+                target_batch.batch[key] = generation_output.batch[key]
+
+    @staticmethod
     def _build_validation_group_keys(batch: DataProto, fallback_inputs: list[str]):
         extra_infos = batch.non_tensor_batch.get("extra_info", None)
         if extra_infos is None:
@@ -625,6 +635,21 @@ class RayPPOTrainer:
             return
         metric_dict.update(
             summarize_sqa3d_validation(
+                data_sources=data_sources.tolist(),
+                group_keys=group_keys,
+                infos_dict=reward_extra_infos_dict,
+            )
+        )
+
+    @staticmethod
+    def _maybe_add_physx_validation_metrics(
+        metric_dict: dict,
+        data_sources: np.ndarray,
+        group_keys: list[str],
+        reward_extra_infos_dict: dict[str, list],
+    ):
+        metric_dict.update(
+            summarize_physx_validation(
                 data_sources=data_sources.tolist(),
                 group_keys=group_keys,
                 infos_dict=reward_extra_infos_dict,
@@ -665,6 +690,358 @@ class RayPPOTrainer:
         os.makedirs(output_dir, exist_ok=True)
         return os.path.join(output_dir, f"validation_predictions_step{step}.jsonl")
 
+    def _training_predictions_path(self, step: int) -> str:
+        output_dir = self.config.trainer.get("training_predictions_dir", None)
+        if not output_dir:
+            output_dir = self.config.trainer.get("validation_predictions_dir", None)
+        if not output_dir:
+            default_local_dir = str(self.config.trainer.get("default_local_dir", ""))
+            output_dir = os.path.dirname(default_local_dir.rstrip(os.sep)) if default_local_dir else os.getcwd()
+        os.makedirs(output_dir, exist_ok=True)
+        return os.path.join(output_dir, f"training_predictions_step{step}.jsonl")
+
+    def _output_artifact_dir(self) -> str:
+        output_dir = self.config.trainer.get("validation_predictions_dir", None)
+        if not output_dir:
+            output_dir = self.config.trainer.get("training_predictions_dir", None)
+        if not output_dir:
+            default_local_dir = str(self.config.trainer.get("default_local_dir", ""))
+            output_dir = os.path.dirname(default_local_dir.rstrip(os.sep)) if default_local_dir else os.getcwd()
+        os.makedirs(output_dir, exist_ok=True)
+        return output_dir
+
+    def _collect_response_generation_stats(self, batch: DataProto) -> tuple[list[float], list[float]]:
+        if batch.batch is None or "responses" not in batch.batch.keys():
+            return [], []
+        response_ids = batch.batch["responses"].detach().cpu()
+        response_cap = int(response_ids.shape[-1])
+        if "attention_mask" not in batch.batch.keys() or "prompts" not in batch.batch.keys():
+            return [], []
+        prompt_len = int(batch.batch["prompts"].shape[-1])
+        response_mask = batch.batch["attention_mask"][:, prompt_len : prompt_len + response_cap]
+        response_lengths = response_mask.sum(dim=-1).detach().cpu().tolist()
+        hit_max = []
+        eos_token_id = self.tokenizer.eos_token_id
+        for i, response_token_len in enumerate(response_lengths):
+            ended_with_eos = False
+            if response_token_len:
+                last_token_idx = min(int(response_token_len) - 1, response_cap - 1)
+                ended_with_eos = int(response_ids[i, last_token_idx].item()) == eos_token_id
+            hit_max.append(float(response_token_len >= response_cap and not ended_with_eos))
+        return [float(length) for length in response_lengths], hit_max
+
+    @staticmethod
+    def _metric_float(value):
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _physx_metric_snapshot(self, metrics: dict) -> dict[str, float | None]:
+        def first_float(*keys):
+            for key in keys:
+                if key in metrics:
+                    value = self._metric_float(metrics.get(key))
+                    if value is not None:
+                        return value
+            return None
+
+        qtype_acc = {}
+        for key, value in metrics.items():
+            prefix = "val-physx/question_type/"
+            suffix = "/accuracy"
+            if key.startswith(prefix) and key.endswith(suffix):
+                qtype = key[len(prefix) : -len(suffix)]
+                parsed = self._metric_float(value)
+                if parsed is not None:
+                    qtype_acc[qtype] = parsed
+
+        return {
+            "acc": first_float("val-physx/overall/accuracy", "val-core/physx_mcq/acc/mean@1"),
+            "invalid_rate": first_float("val-physx/overall/invalid_rate", "val-aux/physx_mcq/invalid/mean@1"),
+            "hit_max_response_length_rate": first_float("val-physx/overall/hit_max_response_length_rate"),
+            "qtype_acc": qtype_acc,
+        }
+
+    def _physx_metric_dict_from_prediction_summary(self, summary: dict) -> dict[str, float]:
+        metric_dict = {
+            "val-core/physx_mcq/acc/mean@1": float(summary.get("accuracy", 0.0)),
+            "val-core/physx_mcq/acc/maj@1": float(summary.get("accuracy", 0.0)),
+            "val-core/physx_mcq/acc/best@1/mean": float(summary.get("accuracy", 0.0)),
+            "val-aux/physx_mcq/invalid/mean@1": float(summary.get("invalid_outputs", 0.0))
+            / max(float(summary.get("num_evaluated", 0.0)), 1.0),
+            "val-physx/overall/num_examples": float(summary.get("num_evaluated", 0.0)),
+            "val-physx/overall/accuracy": float(summary.get("accuracy", 0.0)),
+            "val-physx/overall/invalid_rate": float(summary.get("invalid_outputs", 0.0))
+            / max(float(summary.get("num_evaluated", 0.0)), 1.0),
+            "val-physx/overall/response_token_len_mean": float(summary.get("response_token_len_mean", 0.0)),
+            "val-physx/overall/response_token_len_max": float(summary.get("response_token_len_max", 0.0)),
+            "val-physx/overall/hit_max_response_length_rate": float(
+                summary.get("hit_max_response_length_rate", 0.0)
+            ),
+        }
+        for qtype, row in (summary.get("accuracy_by_question_type") or {}).items():
+            prefix = f"val-physx/question_type/{qtype}"
+            num_evaluated = float(row.get("num_evaluated", 0.0))
+            metric_dict[f"{prefix}/num_examples"] = num_evaluated
+            metric_dict[f"{prefix}/accuracy"] = float(row.get("accuracy", 0.0))
+            metric_dict[f"{prefix}/invalid_rate"] = float(row.get("invalid_outputs", 0.0)) / max(
+                num_evaluated, 1.0
+            )
+        return metric_dict
+
+    def _load_cached_physx_step0_validation(self, cache_jsonl: str) -> dict | None:
+        cache_jsonl = str(cache_jsonl or "").strip()
+        if not cache_jsonl:
+            return None
+        if not os.path.exists(cache_jsonl):
+            print(f"[validation_step0_cache] missing cache_jsonl={cache_jsonl}; running validation", flush=True)
+            return None
+
+        records = []
+        with open(cache_jsonl, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    records.append(json.loads(line))
+        summary = summarize_prediction_records(records)
+        summary["predictions_jsonl"] = cache_jsonl
+        metric_dict = self._physx_metric_dict_from_prediction_summary(summary)
+
+        if self.config.trainer.get("dump_validation_predictions", False):
+            dst = self._validation_predictions_path(step=0)
+            if os.path.abspath(dst) != os.path.abspath(cache_jsonl) and not os.path.exists(dst):
+                shutil.copy2(cache_jsonl, dst)
+                print(f"[validation_step0_cache] copied {cache_jsonl} -> {dst}", flush=True)
+            elif os.path.exists(dst):
+                print(f"[validation_step0_cache] kept existing {dst}", flush=True)
+
+        output_dir = self._output_artifact_dir()
+        cache_summary_path = os.path.join(output_dir, "validation_step0_cache_summary.json")
+        with open(cache_summary_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(self._json_safe(summary), indent=2, ensure_ascii=False) + "\n")
+        print(
+            "[validation_step0_cache] "
+            f"loaded n={summary.get('num_evaluated')} acc={summary.get('accuracy')} "
+            f"invalid={summary.get('invalid_outputs')} source={cache_jsonl}",
+            flush=True,
+        )
+        return metric_dict
+
+    def _write_physx_early_stop_status(self, payload: dict):
+        output_dir = self._output_artifact_dir()
+        status_path = os.path.join(output_dir, "early_stop_status.json")
+        with open(status_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(self._json_safe(payload), indent=2, ensure_ascii=False) + "\n")
+        if payload.get("triggered"):
+            reason_path = os.path.join(output_dir, "early_stop_reason.txt")
+            with open(reason_path, "w", encoding="utf-8") as f:
+                f.write(str(payload.get("reason", "unknown")) + "\n")
+
+    def _checkpoint_step_folder(self, step: int) -> str:
+        return os.path.join(self.config.trainer.default_local_dir, f"global_step_{int(step)}")
+
+    def _write_physx_recovery_status(self, payload: dict):
+        output_dir = self._output_artifact_dir()
+        status_path = os.path.join(output_dir, "physx_recovery_status.json")
+        with open(status_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(self._json_safe(payload), indent=2, ensure_ascii=False) + "\n")
+
+    def _physx_recovery_metric_value(self, metrics: dict) -> float | None:
+        metric = str(self.config.trainer.get("physx_recovery_metric", "accuracy")).strip().lower()
+        snapshot = self._physx_metric_snapshot(metrics)
+        if metric in {"acc", "accuracy", "val_acc"}:
+            return snapshot.get("acc")
+        if metric in {"invalid", "invalid_rate"}:
+            value = snapshot.get("invalid_rate")
+            return -value if value is not None else None
+        if metric in {"hitmax", "hit_max", "hit_max_response_length_rate"}:
+            value = snapshot.get("hit_max_response_length_rate")
+            return -value if value is not None else None
+        return snapshot.get("acc")
+
+    def _maybe_update_physx_recovery_best(self, state: dict | None, metrics: dict, step: int) -> dict | None:
+        if not self.config.trainer.get("physx_recovery_enabled", False):
+            return state
+        if state is None:
+            state = {"enabled": True, "best": None, "history": []}
+        metric_value = self._physx_recovery_metric_value(metrics)
+        snapshot = self._physx_metric_snapshot(metrics)
+        row = {"step": int(step), "metric": metric_value, "snapshot": snapshot}
+        state.setdefault("history", []).append(row)
+        if metric_value is None or not np.isfinite(metric_value):
+            state["last"] = {**row, "saved": False, "reason": "nonfinite_or_missing_metric"}
+            self._write_physx_recovery_status(state)
+            return state
+
+        min_delta = float(self.config.trainer.get("physx_recovery_min_delta", 0.0))
+        best = state.get("best")
+        is_better = best is None or metric_value > float(best.get("metric", -np.inf)) + min_delta
+        if is_better:
+            self._save_checkpoint()
+            checkpoint_path = self._checkpoint_step_folder(step)
+            best = {
+                "step": int(step),
+                "metric": float(metric_value),
+                "snapshot": snapshot,
+                "checkpoint_path": checkpoint_path,
+            }
+            state["best"] = best
+            state["last"] = {**row, "saved": True, "checkpoint_path": checkpoint_path}
+        else:
+            state["last"] = {**row, "saved": False, "best_step": best.get("step") if best else None}
+        self._write_physx_recovery_status(state)
+        return state
+
+    def _restore_physx_recovery_best(self, state: dict | None, reason: str, step: int) -> dict | None:
+        if not self.config.trainer.get("physx_recovery_enabled", False):
+            return None
+        if not self.config.trainer.get("physx_recovery_restore_on_early_stop", True):
+            return None
+        best = (state or {}).get("best") if state else None
+        if not best or not best.get("checkpoint_path"):
+            payload = {
+                "enabled": True,
+                "restored": False,
+                "reason": "no_best_checkpoint",
+                "trigger_reason": reason,
+                "step": int(step),
+                "state": state,
+            }
+            self._write_physx_recovery_status(payload)
+            return payload
+
+        checkpoint_path = str(best["checkpoint_path"])
+        actor_path = os.path.join(checkpoint_path, "actor")
+        critic_path = os.path.join(checkpoint_path, "critic")
+        print(f"[physx_recovery] restoring best checkpoint step={best.get('step')} path={checkpoint_path}", flush=True)
+        self.actor_rollout_wg.load_checkpoint(
+            actor_path, del_local_after_load=self.config.trainer.del_local_ckpt_after_load
+        )
+        if self.use_critic:
+            self.critic_wg.load_checkpoint(
+                critic_path, del_local_after_load=self.config.trainer.del_local_ckpt_after_load
+            )
+        payload = {
+            "enabled": True,
+            "restored": True,
+            "trigger_reason": reason,
+            "restored_from_step": int(best["step"]),
+            "restored_at_step": int(step),
+            "checkpoint_path": checkpoint_path,
+            "best": best,
+            "history": (state or {}).get("history", []),
+        }
+        self._write_physx_recovery_status(payload)
+        return payload
+
+    def _init_physx_early_stop_state(self, baseline: dict | None, step: int) -> dict:
+        acc = None if baseline is None else baseline.get("acc")
+        return {
+            "best_acc": acc,
+            "best_step": int(step),
+            "stale_count": 0,
+            "history": [{"step": int(step), "snapshot": baseline, "best": True}],
+        }
+
+    def _check_physx_early_stop(
+        self, baseline: dict | None, current: dict, step: int, state: dict | None = None
+    ) -> tuple[dict | None, dict | None]:
+        if not self.config.trainer.get("physx_early_stop_enabled", False) or baseline is None:
+            return None, state
+        if state is None:
+            state = self._init_physx_early_stop_state(baseline, step=0)
+
+        thresholds = {
+            "acc_drop": float(self.config.trainer.get("physx_early_stop_acc_drop", 0.05)),
+            "invalid_increase": float(self.config.trainer.get("physx_early_stop_invalid_increase", 0.05)),
+            "hitmax_increase": float(self.config.trainer.get("physx_early_stop_hitmax_increase", 0.05)),
+            "best_acc_drop": float(self.config.trainer.get("physx_early_stop_best_acc_drop", 0.0)),
+            "patience": int(self.config.trainer.get("physx_early_stop_patience", 0)),
+            "min_delta": float(self.config.trainer.get("physx_early_stop_min_delta", 0.0)),
+            "qtype_acc_drop": float(self.config.trainer.get("physx_early_stop_qtype_acc_drop", 0.0)),
+            "qtype_drop_count": int(self.config.trainer.get("physx_early_stop_qtype_drop_count", 0)),
+        }
+        reason = None
+        for key, value in current.items():
+            if isinstance(value, dict):
+                for subkey, subvalue in value.items():
+                    if subvalue is not None and not np.isfinite(subvalue):
+                        reason = f"nonfinite_{key}_{subkey}"
+                        break
+                if reason is not None:
+                    break
+            elif value is not None and not np.isfinite(value):
+                reason = f"nonfinite_{key}"
+                break
+
+        current_acc = current.get("acc")
+        best_acc = state.get("best_acc")
+        improved = False
+        if current_acc is not None and np.isfinite(current_acc):
+            if best_acc is None or current_acc > float(best_acc) + thresholds["min_delta"]:
+                state["best_acc"] = float(current_acc)
+                state["best_step"] = int(step)
+                state["stale_count"] = 0
+                improved = True
+            else:
+                state["stale_count"] = int(state.get("stale_count", 0)) + 1
+        state.setdefault("history", []).append(
+            {
+                "step": int(step),
+                "snapshot": current,
+                "best": improved,
+                "best_acc": state.get("best_acc"),
+                "best_step": state.get("best_step"),
+                "stale_count": state.get("stale_count", 0),
+            }
+        )
+
+        if reason is None and baseline.get("acc") is not None and current.get("acc") is not None:
+            if current["acc"] < baseline["acc"] - thresholds["acc_drop"]:
+                reason = "accuracy_drop"
+        if reason is None and thresholds["best_acc_drop"] > 0 and state.get("best_acc") is not None and current.get("acc") is not None:
+            if current["acc"] < float(state["best_acc"]) - thresholds["best_acc_drop"]:
+                reason = "best_accuracy_drop"
+        if reason is None and baseline.get("invalid_rate") is not None and current.get("invalid_rate") is not None:
+            if current["invalid_rate"] > baseline["invalid_rate"] + thresholds["invalid_increase"]:
+                reason = "invalid_rate_increase"
+        if (
+            reason is None
+            and baseline.get("hit_max_response_length_rate") is not None
+            and current.get("hit_max_response_length_rate") is not None
+        ):
+            if current["hit_max_response_length_rate"] > baseline["hit_max_response_length_rate"] + thresholds["hitmax_increase"]:
+                reason = "hit_max_response_length_increase"
+        qtype_drops = []
+        if reason is None and thresholds["qtype_acc_drop"] > 0 and thresholds["qtype_drop_count"] > 0:
+            baseline_qtypes = baseline.get("qtype_acc") or {}
+            current_qtypes = current.get("qtype_acc") or {}
+            for qtype, base_value in baseline_qtypes.items():
+                cur_value = current_qtypes.get(qtype)
+                if base_value is not None and cur_value is not None and cur_value < base_value - thresholds["qtype_acc_drop"]:
+                    qtype_drops.append({"question_type": qtype, "baseline": base_value, "current": cur_value})
+            if len(qtype_drops) >= thresholds["qtype_drop_count"]:
+                reason = "question_type_accuracy_drop"
+        if reason is None and thresholds["patience"] > 0 and int(state.get("stale_count", 0)) >= thresholds["patience"]:
+            reason = "no_improvement_patience"
+
+        payload = {
+            "enabled": True,
+            "triggered": reason is not None,
+            "reason": reason or "not_triggered",
+            "step": int(step),
+            "baseline": baseline,
+            "current": current,
+            "thresholds": thresholds,
+            "state": state,
+            "qtype_drops": qtype_drops,
+            "collapse_step": int(step) if reason is not None else None,
+        }
+        self._write_physx_early_stop_status(payload)
+        return (payload if reason is not None else None), state
+
     def _record_validation_predictions(
         self,
         *,
@@ -678,6 +1055,7 @@ class RayPPOTrainer:
         output_texts: list[str],
         scores: list[float],
         reward_extra_info: dict[str, list],
+        split: str = "validation",
     ):
         n_items = len(output_texts)
         extra_infos = test_batch.non_tensor_batch.get("extra_info", [None] * n_items)
@@ -697,6 +1075,8 @@ class RayPPOTrainer:
 
         tracked_reward_keys = (
             "pred",
+            "prediction",
+            "prediction_raw",
             "freeform_pred",
             "closed_pred",
             "score",
@@ -704,13 +1084,79 @@ class RayPPOTrainer:
             "official_acc",
             "strict_acc",
             "closed_acc",
+            "correct",
             "unknown",
+            "invalid",
             "closed_unknown",
             "blank",
             "freq",
+            "frequency",
             "entropy",
+            "normalized_entropy",
             "raw_entropy",
+            "ttrv_reward",
+            "reward_variant",
+            "ttrl_pseudo_label",
+            "ttrl_majority_count",
+            "ttrl_majority_ratio",
+            "ttrl_majority_tie",
+            "ttrl_min_majority_ratio",
+            "ttrl_max_majority_ratio",
+            "geo_harmony_label",
+            "geo_harmony_hm",
+            "geo_harmony_scores_json",
+            "geo_harmony_score_A",
+            "geo_harmony_score_B",
+            "geo_harmony_score_C",
+            "geo_harmony_score_D",
+            "geo_original_majority_label",
+            "geo_original_majority_count",
+            "geo_original_majority_ratio",
+            "geo_original_majority_tie",
+            "geo_require_original_majority",
+            "geo_min_original_majority_ratio",
+            "geo_skip_ambiguous_joint_options",
+            "geo_view_id",
+            "geo_view_support",
+            "geo_num_views",
+            "geo_samples_per_view",
+            "geo_min_view_support",
+            "geo_min_hm",
+            "geo_min_view_prob",
+            "geo_min_score_margin",
+            "geo_skipped",
+            "geo_skip_reason",
+            "geo_soft_label",
+            "geo_soft_top_prob",
+            "geo_soft_known_count",
+            "geo_soft_selected",
+            "geo_soft_tie",
+            "geo_soft_view_support",
+            "geo_soft_gamma",
+            "geo_soft_min_max_prob",
+            "geo_soft_min_known_count",
+            "geo_soft_distribution_json",
+            "geo_soft_scores_json",
+            "geo_soft_prob_A",
+            "geo_soft_prob_B",
+            "geo_soft_prob_C",
+            "geo_soft_prob_D",
+            "geo_soft_score_A",
+            "geo_soft_score_B",
+            "geo_soft_score_C",
+            "geo_soft_score_D",
+            "geo_soft_gt_mass",
+            "group_size",
+            "unique_pred_count",
+            "unique_pred_ratio",
+            "group_pass",
+            "group_best_acc",
+            "group_worst_acc",
+            "group_majority_prediction",
+            "group_majority_acc",
+            "answer",
             "answer_type",
+            "task",
         )
         for i in range(n_items):
             extra = self._batch_item(extra_infos, i, {}) or {}
@@ -726,7 +1172,8 @@ class RayPPOTrainer:
                 ended_with_eos = int(response_ids_cpu[i, last_token_idx].item()) == self.tokenizer.eos_token_id
             record = {
                 "step": int(step),
-                "validation_index": int(base_index + i),
+                "split": split,
+                "sample_index": int(base_index + i),
                 "batch_index": int(val_batch_idx),
                 "row_in_batch": int(i),
                 "data_source": self._json_safe(self._batch_item(data_sources, i)),
@@ -736,7 +1183,9 @@ class RayPPOTrainer:
                 "question_type": self._json_safe(extra.get("question_type")),
                 "prompt": input_texts[i],
                 "response": output_texts[i],
+                "prediction_raw": output_texts[i],
                 "ground_truth": self._json_safe(reward_model.get("ground_truth")),
+                "answer": self._json_safe(reward_model.get("ground_truth")),
                 "gt_answers": self._json_safe(extra.get("answers")),
                 "reward": float(scores[i]) if i < len(scores) else None,
                 "response_token_len": int(response_token_len) if response_token_len is not None else None,
@@ -748,10 +1197,31 @@ class RayPPOTrainer:
                     and response_token_len >= response_cap
                     and not ended_with_eos
                 ),
+                "point_path": self._json_safe(extra.get("point_path", extra.get("pc_path"))),
+                "model_path": self._json_safe(self.config.actor_rollout_ref.model.path),
             }
+            if split == "validation":
+                record["validation_index"] = int(base_index + i)
+            elif split == "train":
+                record["train_index"] = int(base_index + i)
             for key in tracked_reward_keys:
                 values = reward_extra_info.get(key)
-                record[key] = self._json_safe(self._batch_item(values, i))
+                value = self._json_safe(self._batch_item(values, i))
+                if value is not None:
+                    record[key] = value
+            if record.get("prediction") is None:
+                record["prediction"] = record.get("pred")
+            if record.get("frequency") is None:
+                record["frequency"] = record.get("freq")
+            if record.get("normalized_entropy") is None:
+                record["normalized_entropy"] = record.get("entropy")
+            if record.get("answer") is None:
+                record["answer"] = record.get("ground_truth")
+            if record.get("correct") is None and record.get("acc") is not None:
+                try:
+                    record["correct"] = bool(float(record["acc"]))
+                except (TypeError, ValueError):
+                    pass
 
             line = json.dumps(record, ensure_ascii=False)
             if prediction_fp is not None:
@@ -781,6 +1251,8 @@ class RayPPOTrainer:
         print_validation_predictions = self.config.trainer.get("print_validation_predictions", False)
         prediction_fp = None
         validation_prediction_count = 0
+        val_response_lengths = []
+        val_hit_max_values = []
         if dump_validation_predictions:
             prediction_path = self._validation_predictions_path(step=self.global_steps)
             prediction_fp = open(prediction_path, "w", encoding="utf-8")
@@ -851,6 +1323,7 @@ class RayPPOTrainer:
                     ),
                 ),
                 "validate": True,
+                "global_step": self.global_steps,
             }
             if self.config.trainer.get("log_validation_batches", False):
                 print(f"test_gen_batch meta info: {test_gen_batch.meta_info}")
@@ -869,6 +1342,7 @@ class RayPPOTrainer:
             # output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
             # sample_outputs.extend(output_texts)
 
+            self._adopt_generation_point_clouds(test_batch, test_output_gen_batch)
             test_batch = test_batch.union(test_output_gen_batch)
 
             # evaluate using reward_function
@@ -920,6 +1394,12 @@ class RayPPOTrainer:
             group_keys=metric_group_keys if use_metric_group_keys else [],
             reward_extra_infos_dict=reward_extra_infos_dict,
         )
+        self._maybe_add_physx_validation_metrics(
+            metric_dict=metric_dict,
+            data_sources=data_sources,
+            group_keys=metric_group_keys if use_metric_group_keys else [],
+            reward_extra_infos_dict=reward_extra_infos_dict,
+        )
 
         # add ttrl metrics
         if self.use_ttrl and "ttrl_info" in result:
@@ -946,6 +1426,8 @@ class RayPPOTrainer:
         print_validation_predictions = self.config.trainer.get("print_validation_predictions", False)
         prediction_fp = None
         validation_prediction_count = 0
+        val_response_lengths = []
+        val_hit_max_values = []
         if dump_validation_predictions:
             prediction_path = self._validation_predictions_path(step=self.global_steps)
             prediction_fp = open(prediction_path, "w", encoding="utf-8")
@@ -1016,6 +1498,7 @@ class RayPPOTrainer:
                     ),
                 ),
                 "validate": True,
+                "global_step": self.global_steps,
             }
             if log_validation_batches:
                 print(f"test_gen_batch meta info: {test_gen_batch.meta_info}")
@@ -1044,7 +1527,11 @@ class RayPPOTrainer:
                     f"decode_sec={time.perf_counter() - decode_start_time:.2f}"
                 )
 
+            self._adopt_generation_point_clouds(test_batch, test_output_gen_batch)
             test_batch = test_batch.union(test_output_gen_batch)
+            batch_response_lengths, batch_hit_max = self._collect_response_generation_stats(test_batch)
+            val_response_lengths.extend(batch_response_lengths)
+            val_hit_max_values.extend(batch_hit_max)
 
             # evaluate using reward_function
             reward_start_time = time.perf_counter()
@@ -1125,6 +1612,17 @@ class RayPPOTrainer:
             group_keys=metric_group_keys if use_metric_group_keys else [],
             reward_extra_infos_dict=reward_extra_infos_dict,
         )
+        self._maybe_add_physx_validation_metrics(
+            metric_dict=metric_dict,
+            data_sources=data_sources,
+            group_keys=metric_group_keys if use_metric_group_keys else [],
+            reward_extra_infos_dict=reward_extra_infos_dict,
+        )
+        if val_response_lengths:
+            metric_dict["val-physx/overall/response_token_len_mean"] = float(np.mean(val_response_lengths))
+            metric_dict["val-physx/overall/response_token_len_max"] = float(np.max(val_response_lengths))
+        if val_hit_max_values:
+            metric_dict["val-physx/overall/hit_max_response_length_rate"] = float(np.mean(val_hit_max_values))
 
         # add ttrl metrics
         if self.use_ttrl and "ttrl_info" in result:
@@ -1386,29 +1884,45 @@ class RayPPOTrainer:
             values = numeric_values(key)
             return float(np.mean(values)) if values else None
 
+        tasks = {str(value) for value in reward_extra_infos_dict.get("task", [])}
+        prefix = "train/physx" if "physx_mcq" in tasks else "train/sqa3d"
         scalar_metrics = {
-            "train/sqa3d/freq_mean": mean("freq"),
-            "train/sqa3d/entropy_mean": mean("entropy"),
-            "train/sqa3d/raw_entropy_mean": mean("raw_entropy"),
-            "train/sqa3d/unknown_rate": mean("unknown"),
-            "train/sqa3d/blank_rate": mean("blank"),
-            "train/sqa3d/em_mean": mean("acc"),
-            "train/sqa3d/pass@votes": mean("group_pass"),
-            "train/sqa3d/unique_pred_ratio": mean("unique_pred_ratio"),
-            "train/sqa3d/group_unknown_rate": mean("group_unknown_rate"),
-            "train/sqa3d/group_blank_rate": mean("group_blank_rate"),
-            "train/sqa3d/group_em_mean": mean("group_em_mean"),
+            f"{prefix}/freq_mean": mean("freq"),
+            f"{prefix}/entropy_mean": mean("entropy"),
+            f"{prefix}/raw_entropy_mean": mean("raw_entropy"),
+            f"{prefix}/unknown_rate": mean("unknown"),
+            f"{prefix}/blank_rate": mean("blank"),
+            f"{prefix}/acc_mean": mean("acc"),
+            f"{prefix}/pass@votes": mean("group_pass"),
+            f"{prefix}/best_acc@votes": mean("group_best_acc"),
+            f"{prefix}/worst_acc@votes": mean("group_worst_acc"),
+            f"{prefix}/majority_acc@votes": mean("group_majority_acc"),
+            f"{prefix}/unique_pred_ratio": mean("unique_pred_ratio"),
+            f"{prefix}/group_unknown_rate": mean("group_unknown_rate"),
+            f"{prefix}/group_blank_rate": mean("group_blank_rate"),
+            f"{prefix}/group_acc_mean": mean("group_acc_mean"),
+            f"{prefix}/group_em_mean": mean("group_em_mean"),
+            f"{prefix}/ttrv_reward_mean": mean("ttrv_reward"),
+            f"{prefix}/ttrl_majority_ratio_mean": mean("ttrl_majority_ratio"),
+            f"{prefix}/geo_harmony_hm_mean": mean("geo_harmony_hm"),
+            f"{prefix}/geo_view_support_mean": mean("geo_view_support"),
+            f"{prefix}/geo_skipped_rate": mean("geo_skipped"),
+            f"{prefix}/geo_soft_selected_rate": mean("geo_soft_selected"),
+            f"{prefix}/geo_soft_top_prob_mean": mean("geo_soft_top_prob"),
+            f"{prefix}/geo_soft_known_count_mean": mean("geo_soft_known_count"),
+            f"{prefix}/geo_soft_gt_mass_mean": mean("geo_soft_gt_mass"),
+            f"{prefix}/geo_soft_view_support_mean": mean("geo_soft_view_support"),
         }
         freq_values = numeric_values("freq")
         if freq_values:
-            scalar_metrics["train/sqa3d/freq_max"] = float(np.max(freq_values))
-            scalar_metrics["train/sqa3d/freq_min"] = float(np.min(freq_values))
+            scalar_metrics[f"{prefix}/freq_max"] = float(np.max(freq_values))
+            scalar_metrics[f"{prefix}/freq_min"] = float(np.min(freq_values))
         unique_counts = numeric_values("unique_pred_count")
         if unique_counts:
-            scalar_metrics["train/sqa3d/unique_pred_count_mean"] = float(np.mean(unique_counts))
+            scalar_metrics[f"{prefix}/unique_pred_count_mean"] = float(np.mean(unique_counts))
         group_sizes = numeric_values("group_size")
         if group_sizes:
-            scalar_metrics["train/sqa3d/group_size_mean"] = float(np.mean(group_sizes))
+            scalar_metrics[f"{prefix}/group_size_mean"] = float(np.mean(group_sizes))
 
         metrics.update({key: value for key, value in scalar_metrics.items() if value is not None})
 
@@ -1434,12 +1948,51 @@ class RayPPOTrainer:
         # load checkpoint before doing anything
         self._load_checkpoint()
 
+        physx_early_stop_baseline = None
+        physx_early_stop_state = None
+        physx_recovery_state = None
+
         # perform validation before training
         # currently, we only support validation using the reward_function.
         if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
-            val_metrics = self._validate()
+            val_metrics = self._load_cached_physx_step0_validation(
+                self.config.trainer.get("validation_step0_cache_jsonl", "")
+            )
+            if val_metrics is None:
+                val_metrics = self._validate()
             pprint(f"Initial validation metrics: {val_metrics}")
             logger.log(data=val_metrics, step=self.global_steps)
+            physx_early_stop_baseline = self._physx_metric_snapshot(val_metrics)
+            physx_early_stop_state = self._init_physx_early_stop_state(
+                physx_early_stop_baseline, self.global_steps
+            )
+            physx_recovery_state = self._maybe_update_physx_recovery_best(
+                physx_recovery_state, val_metrics, self.global_steps
+            )
+            if self.config.trainer.get("physx_early_stop_enabled", False):
+                self._write_physx_early_stop_status(
+                    {
+                        "enabled": True,
+                        "triggered": False,
+                        "reason": "baseline",
+                        "step": int(self.global_steps),
+                        "baseline": physx_early_stop_baseline,
+                        "current": physx_early_stop_baseline,
+                        "thresholds": {
+                            "acc_drop": float(self.config.trainer.get("physx_early_stop_acc_drop", 0.05)),
+                            "invalid_increase": float(
+                                self.config.trainer.get("physx_early_stop_invalid_increase", 0.05)
+                            ),
+                            "hitmax_increase": float(self.config.trainer.get("physx_early_stop_hitmax_increase", 0.05)),
+                            "best_acc_drop": float(self.config.trainer.get("physx_early_stop_best_acc_drop", 0.0)),
+                            "patience": int(self.config.trainer.get("physx_early_stop_patience", 0)),
+                            "min_delta": float(self.config.trainer.get("physx_early_stop_min_delta", 0.0)),
+                            "qtype_acc_drop": float(self.config.trainer.get("physx_early_stop_qtype_acc_drop", 0.0)),
+                            "qtype_drop_count": int(self.config.trainer.get("physx_early_stop_qtype_drop_count", 0)),
+                        },
+                        "state": physx_early_stop_state,
+                    }
+                )
             if self.config.trainer.get("val_only", False):
                 return
 
@@ -1454,10 +2007,12 @@ class RayPPOTrainer:
             for batch_dict in self.train_dataloader:
                 metrics = {}
                 timing_raw = {}
+                early_stop_payload = None
 
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
 
                 batch.meta_info["do_vote"] = False
+                batch.meta_info["global_step"] = self.global_steps
                 if self.use_ttrl or self.use_vote_sampling:
                     self.config.actor_rollout_ref.rollout.n = self.n_votes_per_prompt
                     batch.meta_info["do_vote"] = True
@@ -1467,13 +2022,13 @@ class RayPPOTrainer:
                     gen_batch = batch.pop(
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
                         non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
-                        meta_info_keys=["do_vote"]
+                        meta_info_keys=["do_vote", "global_step"]
                     )
                 else:
                     gen_batch = batch.pop(
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
                         non_tensor_batch_keys=["raw_prompt_ids"],
-                        meta_info_keys=["do_vote"]
+                        meta_info_keys=["do_vote", "global_step"]
                     )
                 self._copy_point_clouds_to_generation_batch(batch, gen_batch)
 
@@ -1508,6 +2063,7 @@ class RayPPOTrainer:
                     )
                     # repeat to align with repeated responses in rollout
                     batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
+                    self._adopt_generation_point_clouds(batch, gen_batch_output)
                     batch = batch.union(gen_batch_output)
 
                     batch.batch["response_mask"] = compute_response_mask(batch)
@@ -1617,6 +2173,50 @@ class RayPPOTrainer:
                         if reward_extra_infos_dict:
                             batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
 
+                        dump_training_predictions = self.config.trainer.get("dump_training_predictions", False)
+                        print_training_predictions = self.config.trainer.get("print_training_predictions", False)
+                        if dump_training_predictions or print_training_predictions:
+                            training_prediction_fp = None
+                            if dump_training_predictions:
+                                training_prediction_path = self._training_predictions_path(step=self.global_steps)
+                                training_prediction_fp = open(training_prediction_path, "w", encoding="utf-8")
+                                print(
+                                    f"[training_predictions] step={self.global_steps} path={training_prediction_path}",
+                                    flush=True,
+                                )
+                            try:
+                                if batch.batch is not None and "prompts" in batch.batch.keys():
+                                    train_input_texts = self.tokenizer.batch_decode(
+                                        batch.batch["prompts"], skip_special_tokens=True
+                                    )
+                                else:
+                                    train_input_texts = [""] * len(batch)
+                                train_output_texts = self.tokenizer.batch_decode(
+                                    batch.batch["responses"], skip_special_tokens=True
+                                )
+                                train_scores = reward_tensor.sum(dim=-1).detach().cpu().tolist()
+                                self._record_validation_predictions(
+                                    prediction_fp=training_prediction_fp,
+                                    print_predictions=print_training_predictions,
+                                    step=self.global_steps,
+                                    val_batch_idx=0,
+                                    base_index=0,
+                                    test_batch=batch,
+                                    input_texts=train_input_texts,
+                                    output_texts=train_output_texts,
+                                    scores=train_scores,
+                                    reward_extra_info=reward_extra_infos_dict,
+                                    split="train",
+                                )
+                                if dump_training_predictions:
+                                    print(
+                                        f"[training_predictions] step={self.global_steps} records={len(train_output_texts)}",
+                                        flush=True,
+                                    )
+                            finally:
+                                if training_prediction_fp is not None:
+                                    training_prediction_fp.close()
+
                         # compute rewards. apply_kl_penalty if available
                         if self.config.algorithm.use_kl_in_reward:
                             batch, kl_metrics = apply_kl_penalty(
@@ -1661,6 +2261,40 @@ class RayPPOTrainer:
                             if is_last_step:
                                 last_val_metrics = val_metrics
                         metrics.update(val_metrics)
+                        current_physx_metrics = self._physx_metric_snapshot(val_metrics)
+                        if physx_early_stop_baseline is None:
+                            physx_early_stop_baseline = current_physx_metrics
+                            physx_early_stop_state = self._init_physx_early_stop_state(
+                                physx_early_stop_baseline, self.global_steps
+                            )
+                        else:
+                            early_stop_payload, physx_early_stop_state = self._check_physx_early_stop(
+                                baseline=physx_early_stop_baseline,
+                                current=current_physx_metrics,
+                                step=self.global_steps,
+                                state=physx_early_stop_state,
+                            )
+                    if early_stop_payload is not None:
+                        recovery_payload = self._restore_physx_recovery_best(
+                            physx_recovery_state,
+                            reason=str(early_stop_payload.get("reason", "early_stop")),
+                            step=self.global_steps,
+                        )
+                        if recovery_payload is not None:
+                            early_stop_payload["recovery"] = recovery_payload
+                            self._write_physx_early_stop_status(early_stop_payload)
+                            metrics["physx_recovery/restored"] = 1.0 if recovery_payload.get("restored") else 0.0
+                            if recovery_payload.get("restored_from_step") is not None:
+                                metrics["physx_recovery/restored_from_step"] = float(
+                                    recovery_payload["restored_from_step"]
+                                )
+                        metrics["early_stop/triggered"] = 1.0
+                        metrics["early_stop/step"] = float(self.global_steps)
+
+                    if early_stop_payload is None:
+                        physx_recovery_state = self._maybe_update_physx_recovery_best(
+                            physx_recovery_state, val_metrics, self.global_steps
+                        )
 
                     if self.config.trainer.save_freq > 0 and (
                         is_last_step or self.global_steps % self.config.trainer.save_freq == 0
@@ -1677,6 +2311,11 @@ class RayPPOTrainer:
 
                 # TODO: make a canonical logger that supports various backend
                 logger.log(data=metrics, step=self.global_steps)
+
+                if early_stop_payload is not None:
+                    pprint(f"Early stopping triggered: {early_stop_payload}")
+                    progress_bar.close()
+                    return
 
                 if is_last_step:
                     pprint(f"Final validation metrics: {last_val_metrics}")

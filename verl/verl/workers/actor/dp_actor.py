@@ -37,6 +37,17 @@ __all__ = ["DataParallelPPOActor"]
 POINT_CLOUD_MODEL_KEYS = ("point_clouds", "box_query", "box_mask", "click_query", "click_mask")
 
 
+def _get_model_type(module: nn.Module) -> str | None:
+    module = getattr(module, "module", module)
+    return getattr(getattr(module, "config", None), "model_type", None)
+
+
+def _point_cloud_model_keys(model_type: str | None):
+    if model_type == "pointllm":
+        return ("point_clouds",)
+    return POINT_CLOUD_MODEL_KEYS
+
+
 class DataParallelPPOActor(BasePPOActor):
     def __init__(self, config, actor_module: nn.Module, actor_optimizer: torch.optim.Optimizer = None):
         """When optimizer is None, it is Reference Policy"""
@@ -85,13 +96,13 @@ class DataParallelPPOActor(BasePPOActor):
             attention_mask = micro_batch["attention_mask"]
             position_ids = micro_batch["position_ids"]
             entropy = None
-            model_type = getattr(getattr(self.actor_module, "config", None), "model_type", None)
+            model_type = _get_model_type(self.actor_module)
             if "point_clouds" in micro_batch:
                 try:
                     model_dtype = next(self.actor_module.parameters()).dtype
                 except StopIteration:
                     model_dtype = torch.bfloat16
-                for key in POINT_CLOUD_MODEL_KEYS:
+                for key in _point_cloud_model_keys(model_type):
                     if key not in micro_batch:
                         continue
                     dtype = model_dtype if key == "point_clouds" else torch.float32
@@ -263,7 +274,8 @@ class DataParallelPPOActor(BasePPOActor):
 
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
         if "point_clouds" in data.batch.keys():
-            select_keys.extend([key for key in POINT_CLOUD_MODEL_KEYS if key in data.batch.keys()])
+            point_cloud_keys = _point_cloud_model_keys(_get_model_type(self.actor_module))
+            select_keys.extend([key for key in point_cloud_keys if key in data.batch.keys()])
         batch = data.select(batch_keys=select_keys).batch
         has_multi_modal_inputs = "multi_modal_inputs" in data.non_tensor_batch.keys()
 
@@ -344,7 +356,8 @@ class DataParallelPPOActor(BasePPOActor):
 
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids", "old_log_probs", "advantages"]
         if "point_clouds" in data.batch.keys():
-            select_keys.extend([key for key in POINT_CLOUD_MODEL_KEYS if key in data.batch.keys()])
+            point_cloud_keys = _point_cloud_model_keys(_get_model_type(self.actor_module))
+            select_keys.extend([key for key in point_cloud_keys if key in data.batch.keys()])
         if self.config.use_kl_loss:
             select_keys.append("ref_log_prob")
         batch = data.select(batch_keys=select_keys).batch

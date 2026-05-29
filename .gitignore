@@ -1,0 +1,21 @@
+# Local datasets, checkpoints, and experiment outputs.
+data/
+output/
+outputs/
+results/
+physx_mcq_workspace/
+LL3DA/
+SQA3D/
+
+# Local logs/caches.
+*.log
+*.out
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Nested or external project caches.
+pointllm-src/
+pointllm-src/outputs/
+pointllm-src/logs/
+verl/logs/

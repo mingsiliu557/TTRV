@@ -18,6 +18,7 @@ Then, get full state_dict and bind the state_dict to the single GPU model. Then,
 """
 
 import contextlib
+import hashlib
 
 import torch
 import torch.distributed
@@ -35,6 +36,117 @@ __all__ = ["HFRollout"]
 POINT_CLOUD_MODEL_KEYS = ("point_clouds", "box_query", "box_mask", "click_query", "click_mask")
 
 
+def _get_model_type(module: nn.Module) -> str | None:
+    module = getattr(module, "module", module)
+    return getattr(getattr(module, "config", None), "model_type", None)
+
+
+def _point_cloud_model_keys(model_type: str | None):
+    if model_type == "pointllm":
+        return ("point_clouds",)
+    return POINT_CLOUD_MODEL_KEYS
+
+
+def _as_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _stable_int(value) -> int:
+    digest = hashlib.sha256(str(value).encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "little", signed=False)
+
+
+def _normalize_xyz_inplace(point_clouds: torch.Tensor) -> torch.Tensor:
+    xyz = point_clouds[..., :3]
+    xyz.sub_(xyz.mean(dim=1, keepdim=True))
+    radius = torch.sqrt(torch.sum(xyz * xyz, dim=-1)).amax(dim=1, keepdim=True).clamp_min_(1e-6)
+    xyz.div_(radius.unsqueeze(-1))
+    return point_clouds
+
+
+def _apply_downsample(point_cloud: torch.Tensor, ratio: float, generator: torch.Generator) -> torch.Tensor:
+    num_points = int(point_cloud.shape[0])
+    keep = max(1, min(num_points, int(round(num_points * ratio))))
+    perm = torch.randperm(num_points, device=point_cloud.device, generator=generator)[:keep]
+    choice = torch.randint(0, keep, (num_points,), device=point_cloud.device, generator=generator)
+    return point_cloud.index_select(0, perm.index_select(0, choice))
+
+
+def _policy_for_view(policy: str, view_id: int, seed: int) -> str:
+    policy = str(policy or "none").strip().lower()
+    if policy != "mixed":
+        return policy
+    policies = ("sparsity", "sensor_noise", "rigid_pose", "composite")
+    return policies[(view_id + seed) % len(policies)]
+
+
+def _apply_point_cloud_reframes(point_clouds: torch.Tensor, *, n: int, config, meta_info: dict) -> torch.Tensor:
+    policy = str(config.get("point_cloud_reframe_policy", "none") or "none").strip().lower()
+    if policy in {"", "none", "off", "false"} or n <= 1:
+        return point_clouds
+    if point_clouds.ndim != 3 or point_clouds.shape[-1] < 3:
+        return point_clouds
+
+    num_views = max(1, int(config.get("point_cloud_reframe_num_views", 1) or 1))
+    samples_per_view = int(config.get("point_cloud_reframe_samples_per_view", 0) or 0)
+    if samples_per_view <= 0:
+        samples_per_view = max(1, (n + num_views - 1) // num_views)
+    seed = int(config.get("point_cloud_reframe_seed", 0) or 0)
+    seed += int(meta_info.get("global_step", 0) or 0) * 1000003
+
+    out = point_clouds.clone()
+    batch_size = int(out.shape[0])
+    base_seed = seed + _stable_int((batch_size, n, policy))
+    scale_min = float(config.get("point_cloud_reframe_scale_min", 0.95) or 0.95)
+    scale_max = float(config.get("point_cloud_reframe_scale_max", 1.05) or 1.05)
+    translate = float(config.get("point_cloud_reframe_translate", 0.03) or 0.0)
+    jitter_sigma = float(config.get("point_cloud_reframe_jitter_sigma", 0.01) or 0.0)
+    jitter_clip = float(config.get("point_cloud_reframe_jitter_clip", 0.03) or 0.0)
+    downsample_min = float(config.get("point_cloud_reframe_downsample_min", 0.60) or 0.60)
+    downsample_max = float(config.get("point_cloud_reframe_downsample_max", 0.85) or 0.85)
+    renormalize = _as_bool(config.get("point_cloud_reframe_renormalize", False), default=False)
+
+    for row in range(batch_size):
+        repeat_idx = row % n
+        view_id = min(repeat_idx // samples_per_view, num_views - 1)
+        if view_id <= 0:
+            continue
+        generator = torch.Generator(device=out.device)
+        generator.manual_seed(base_seed + row * 9176 + view_id * 101)
+        row_policy = _policy_for_view(policy, view_id, seed)
+
+        if row_policy in {"sparsity", "composite"}:
+            ratio = downsample_min + (downsample_max - downsample_min) * torch.rand(
+                (), device=out.device, generator=generator
+            ).item()
+            out[row] = _apply_downsample(out[row], ratio, generator)
+
+        if row_policy in {"sensor_noise", "rigid_pose", "composite"}:
+            scale = scale_min + (scale_max - scale_min) * torch.rand((), device=out.device, generator=generator).item()
+            out[row, :, :3].mul_(scale)
+
+        if row_policy in {"rigid_pose", "composite"} and translate > 0:
+            shift = torch.empty((1, 3), device=out.device, dtype=out.dtype).uniform_(
+                -translate, translate, generator=generator
+            )
+            out[row, :, :3].add_(shift)
+
+        if row_policy in {"sensor_noise", "composite"} and jitter_sigma > 0:
+            noise = torch.randn(out[row, :, :3].shape, device=out.device, dtype=out.dtype, generator=generator)
+            noise.mul_(jitter_sigma)
+            if jitter_clip > 0:
+                noise.clamp_(-jitter_clip, jitter_clip)
+            out[row, :, :3].add_(noise)
+
+    if renormalize:
+        _normalize_xyz_inplace(out)
+    return out
+
+
 class HFRollout(BaseRollout):
     def __init__(self, module: nn.Module, config):
         super().__init__()
@@ -46,6 +158,10 @@ class HFRollout(BaseRollout):
             n = 1 if prompts.meta_info.get("validate", False) else self.config.get("n", 1)
         if n > 1:
             prompts = prompts.repeat(repeat_times=n, interleave=True)
+            if "point_clouds" in prompts.batch:
+                prompts.batch["point_clouds"] = _apply_point_cloud_reframes(
+                    prompts.batch["point_clouds"], n=n, config=self.config, meta_info=prompts.meta_info
+                )
         batch_size = prompts.batch.batch_size[0]
         num_chunks = max(batch_size // self.config.get("micro_batch_size", batch_size), 1)
         batch_prompts = prompts.chunk(chunks=num_chunks)
@@ -66,12 +182,13 @@ class HFRollout(BaseRollout):
         batch_size = idx.size(0)
         prompt_length = idx.size(1)
         generate_kwargs = {}
+        model_type = _get_model_type(self.module)
         if "point_clouds" in prompts.batch:
             try:
                 model_dtype = next(self.module.parameters()).dtype
             except StopIteration:
                 model_dtype = torch.bfloat16
-            for key in POINT_CLOUD_MODEL_KEYS:
+            for key in _point_cloud_model_keys(model_type):
                 if key not in prompts.batch:
                     continue
                 tensor = prompts.batch[key].to(device=idx.device)
@@ -101,7 +218,6 @@ class HFRollout(BaseRollout):
             sampling_kwargs.update(temperature=temperature, top_p=top_p, top_k=top_k)
 
         if isinstance(self.module, FSDP):
-            model_type = getattr(getattr(getattr(self.module, "module", None), "config", None), "model_type", None)
             recurse = model_type in {"pointllm", "ll3da"}
             # Point-cloud models use non-LLM backbones during generation, so recursively expose wrapped params.
             param_ctx = FSDP.summon_full_params(self.module, writeback=False, recurse=recurse)
@@ -162,6 +278,9 @@ class HFRollout(BaseRollout):
             },
             batch_size=batch_size,
         )
+        for key in _point_cloud_model_keys(model_type):
+            if key in prompts.batch:
+                batch[key] = prompts.batch[key]
 
         # empty cache before compute old_log_prob
         torch.cuda.empty_cache()

@@ -229,7 +229,7 @@ class ActorRolloutRefWorker(Worker):
         init_context = (
             contextlib.nullcontext
             if is_ll3da
-            else lambda: get_init_weight_context_manager(
+            else get_init_weight_context_manager(
                 use_meta_tensor=not actor_model_config.tie_word_embeddings, mesh=self.device_mesh
             )
         )
@@ -330,6 +330,10 @@ class ActorRolloutRefWorker(Worker):
                 actor_module.to(torch_dtype)
                 if self.rank == 0:
                     actor_module.print_trainable_parameters()
+                # PEFT freezes the base model and leaves LoRA adapters trainable.
+                # FSDP flattening requires uniform requires_grad unless original
+                # parameters are preserved.
+                use_orig_params = True
 
             if enable_gradient_checkpointing:
                 actor_module.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import inspect
 from collections import defaultdict
 
 import torch
@@ -40,22 +41,35 @@ class BatchRewardManager:
         valid_response_lengths = attention_mask[:, prompt_len:].sum(dim=-1)
 
         responses_str = []
+        prompt_strs = []
         for i in range(len(data)):
             valid_len = valid_response_lengths[i]
             valid_response_ids = response_ids[i][:valid_len]
             response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)
             responses_str.append(response_str)
+            prompt_strs.append(self.tokenizer.decode(prompt_ids[i], skip_special_tokens=True))
 
         ground_truths = [item.non_tensor_batch["reward_model"].get("ground_truth", None) for item in data]
         data_sources = data.non_tensor_batch[self.reward_fn_key]
         extras = data.non_tensor_batch.get("extra_info", [None] * len(data))
+        reward_kwargs = dict(self.reward_kwargs)
+        try:
+            signature = inspect.signature(self.compute_score)
+            params = signature.parameters.values()
+            accepts_prompt_strs = "prompt_strs" in signature.parameters or any(
+                param.kind == inspect.Parameter.VAR_KEYWORD for param in params
+            )
+        except (TypeError, ValueError):
+            accepts_prompt_strs = False
+        if accepts_prompt_strs:
+            reward_kwargs["prompt_strs"] = prompt_strs
 
         scores = self.compute_score(
             data_sources=data_sources,
             solution_strs=responses_str,
             ground_truths=ground_truths,
             extra_infos=extras,
-            **self.reward_kwargs,
+            **reward_kwargs,
         )
 
         return scores

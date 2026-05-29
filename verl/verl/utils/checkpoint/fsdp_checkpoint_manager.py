@@ -101,22 +101,11 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                     f"[rank-{self.rank}]: remove local resume ckpt file after loading failed, exception {e} will be ignored"
                 )
 
-        # lr_scheduler_state_dict = extra_state_dict["lr_scheduler"]
         model_state_dict = torch.load(local_model_path, map_location="cpu")
-
-# Get expected sharded state dict from FSDP model
-        with FSDP.state_shard_degree(1):  # Optional optimization
-            sharded_state_dict = get_state_dict(self.model)
-
-# Now load the saved state into the sharded structure
-        set_state_dict(self.model, sharded_state_dict, model_state_dict)
-
-        # state_dict_cfg = ShardedStateDictConfig(offload_to_cpu=True)
-        # optim_cfg = ShardedOptimStateDictConfig(offload_to_cpu=True)
-        # with FSDP.state_dict_type(self.model, StateDictType.SHARDED_STATE_DICT, state_dict_cfg, optim_cfg):
-        #     self.model.load_state_dict(model_state_dict)
-            # if self.optimizer is not None:
-            #     self.optimizer.load_state_dict(optimizer_state_dict)
+        state_dict_cfg = ShardedStateDictConfig(offload_to_cpu=True)
+        optim_cfg = ShardedOptimStateDictConfig(offload_to_cpu=True)
+        with FSDP.state_dict_type(self.model, StateDictType.SHARDED_STATE_DICT, state_dict_cfg, optim_cfg):
+            self.model.load_state_dict(model_state_dict)
         # recover random state
         # if "rng" in extra_state_dict:
         #     # 'rng' may not exist for backward compatibility
@@ -174,7 +163,7 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                 print(f"[rank-{self.rank}]: Saving model to {os.path.abspath(model_path)}")
                 print(f"[rank-{self.rank}]: Saving checkpoint to {os.path.abspath(model_path)}")
                 print(f"[rank-{self.rank}]: Saving extra_state to {os.path.abspath(extra_path)}")
-                # torch.save(model_state_dict, model_path)
+                torch.save(model_state_dict, model_path)
                 # torch.save(optimizer_state_dict, optim_path)  # TODO: address optimizer is None
                 # torch.save(extra_state_dict, extra_path)
 

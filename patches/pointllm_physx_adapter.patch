@@ -1,0 +1,3315 @@
+# PointLLM PhysX adapter local changes
+# Apply from /root/autodl-tmp/TTRV/pointllm-src with: git apply /root/autodl-tmp/TTRV/patches/pointllm_physx_adapter.patch
+
+diff --git a/pointllm/model/pointbert/point_encoder.py b/pointllm/model/pointbert/point_encoder.py
+index e01a018..cbb916e 100644
+--- a/pointllm/model/pointbert/point_encoder.py
++++ b/pointllm/model/pointbert/point_encoder.py
+@@ -169,6 +169,17 @@ class PointTransformer(nn.Module):
+     def forward(self, pts):
+         # divide the point cloud in the same form. This is important
+         neighborhood, center = self.group_divider(pts)
++
++        def first_param_dtype(module, default_dtype):
++            for param in module.parameters():
++                return param.dtype
++            return default_dtype
++
++        default_compute_dtype = torch.bfloat16 if pts.is_cuda else pts.dtype
++        encoder_dtype = first_param_dtype(self.encoder, default_compute_dtype)
++        pos_dtype = first_param_dtype(self.pos_embed, default_compute_dtype)
++        neighborhood = neighborhood.to(dtype=encoder_dtype)
++        center = center.to(dtype=pos_dtype)
+         # encoder the input cloud blocks
+         group_input_tokens = self.encoder(neighborhood)  # B G N
+         group_input_tokens = self.reduce_dim(group_input_tokens)
+@@ -186,4 +197,4 @@ class PointTransformer(nn.Module):
+         if not self.use_max_pool:
+             return x
+         concat_f = torch.cat([x[:, 0], x[:, 1:].max(1)[0]], dim=-1).unsqueeze(1) # * concat the cls token and max pool the features of different tokens, make it B, 1, C
+-        return concat_f # * B, 1, C(384 + 384)
+\ No newline at end of file
++        return concat_f # * B, 1, C(384 + 384)
+diff --git a/pointllm/model/pointllm.py b/pointllm/model/pointllm.py
+index c0c4a30..6fd0d04 100644
+--- a/pointllm/model/pointllm.py
++++ b/pointllm/model/pointllm.py
+@@ -114,13 +114,31 @@ class PointLLMLlamaModel(LlamaModel):
+             with torch.no_grad() if self.fix_pointnet else nullcontext():
+                 if self.fix_pointnet:
+                     self.point_backbone.eval()
++                point_device = inputs_embeds.device
++                # FSDP mixed precision can leave non-parameter buffers in fp32 while
++                # compute parameters are bf16. Match the active CUDA autocast dtype
++                # so PointBERT BatchNorm sees inputs and weights with the same dtype.
++                point_dtype = inputs_embeds.dtype
++                if point_device.type == "cuda":
++                    try:
++                        autocast_enabled = torch.is_autocast_enabled("cuda")
++                    except TypeError:
++                        autocast_enabled = torch.is_autocast_enabled()
++                    if autocast_enabled:
++                        try:
++                            point_dtype = torch.get_autocast_dtype("cuda")
++                        except AttributeError:
++                            point_dtype = torch.get_autocast_gpu_dtype()
++
+                 if type(point_clouds) is list:
+                     # * variable numbers of points
+                     point_features = []
+                     for point_cloud in point_clouds: # * iterate over batch
++                        point_cloud = point_cloud.to(device=point_device, dtype=point_dtype)
+                         point_feature = self.point_backbone(point_cloud.unsqueeze(0))[0]
+                         point_features.append(point_feature)
+                 else:
++                    point_clouds = point_clouds.to(device=point_device, dtype=point_dtype)
+                     point_features = self.point_backbone(point_clouds)
+
+             if type(point_clouds) is list:
+diff --git a/AGENTS.md b/AGENTS.md
+new file mode 100644
+index 0000000..5fe9d85
+--- /dev/null
++++ b/AGENTS.md
+@@ -0,0 +1,18 @@
++# AGENTS.md
++
++This directory is part of the PointLLM + PhysX-MCQ TTRV experiment.
++
++Follow the project-level instructions in:
++
++```text
++/root/autodl-tmp/TTRV/AGENTS.md
++```
++
++Local notes:
++
++- Main PointLLM evaluation entry: `scripts/eval_physx_mcq_pointllm.py`.
++- Keep freeform generation as the default TTRV-compatible path.
++- `choice_logits` and `constrained_generate` are diagnostic modes only.
++- Preserve `prediction_raw`; compute eval and TTRV frequency from parsed `prediction`.
++- Write PointLLM logs and reports under `logs/` and `outputs/`.
++- Do not modify original PhysXNet files or model caches.
+diff --git a/scripts/build_physx_cleaned_options.py b/scripts/build_physx_cleaned_options.py
+new file mode 100644
+index 0000000..0f78771
+--- /dev/null
++++ b/scripts/build_physx_cleaned_options.py
+@@ -0,0 +1,601 @@
++#!/usr/bin/env python3
++"""Build cleaned PhysX-MCQ option sets and bad-case audit reports.
++
++The script reads the original PhysX-MCQ VERL JSON and JSONL sidecar, writes a
++separate cleaned dataset, and never modifies the original PhysXNet files.
++"""
++
++from __future__ import annotations
++
++import argparse
++import collections
++import json
++import math
++import re
++import sys
++from pathlib import Path
++from typing import Any, Iterable
++
++SCRIPT_DIR = Path(__file__).resolve().parent
++REPO_ROOT = SCRIPT_DIR.parents[0]
++TTRV_ROOT = REPO_ROOT.parent
++PHYSX_ROOT = TTRV_ROOT / "physx_mcq_workspace" / "PhysX-3D"
++
++DEFAULT_DATASET = PHYSX_ROOT / "outputs" / "physxnet_mcq_verl.json"
++DEFAULT_SIDECAR = PHYSX_ROOT / "outputs" / "physxnet_mcq.jsonl"
++DEFAULT_OUTPUT_DIR = TTRV_ROOT / "outputs" / "physx_cleaned_options_v1"
++DEFAULT_FIXED_STEP0 = TTRV_ROOT / "results" / "physx_geo_harmony_qtype_repro_20260526" / "fixed_step0_caches"
++DEFAULT_JOINT_VOTE8 = (
++    TTRV_ROOT
++    / "outputs"
++    / "20260526_geo_harmony_full_joint_type_vote8_sensor_baseline_keep"
++    / "validation_predictions_step0.jsonl"
++)
++DEFAULT_MOVABLE_VOTE8 = (
++    TTRV_ROOT
++    / "outputs"
++    / "20260526_geo_harmony_full_movable_part_vote8_sensor_baseline_keep"
++    / "validation_predictions_step0.jsonl"
++)
++
++if str(PHYSX_ROOT) not in sys.path:
++    sys.path.insert(0, str(PHYSX_ROOT))
++
++from qa_builder.parser import parse_annotation  # noqa: E402
++from qa_builder.utils import normalize_choice  # noqa: E402
++
++LETTERS = "ABCD"
++JOINT_CANONICAL_OPTIONS = [
++    "fixed or rigid joint (no movement)",
++    "prismatic joint",
++    "revolute or hinge joint",
++    "compound prismatic and revolute joint",
++]
++JOINT_RAW_TO_CANONICAL = {
++    "A": "fixed or rigid joint (no movement)",
++    "E": "fixed or rigid joint (no movement)",
++    "B": "prismatic joint",
++    "C": "revolute or hinge joint",
++    "D": "revolute or hinge joint",
++    "CB": "compound prismatic and revolute joint",
++}
++JOINT_CONFLICT_GROUPS = {
++    "hinge_vs_revolute": ("hinge", "revolute"),
++    "slider_vs_prismatic": ("slider", "prismatic"),
++    "fixed_vs_rigid": ("fixed", "rigid"),
++}
++
++
++def read_json(path: Path) -> Any:
++    with path.open("r", encoding="utf-8") as handle:
++        return json.load(handle)
++
++
++def read_jsonl(path: Path) -> list[dict[str, Any]]:
++    rows: list[dict[str, Any]] = []
++    with path.open("r", encoding="utf-8") as handle:
++        for line in handle:
++            if line.strip():
++                rows.append(json.loads(line))
++    return rows
++
++
++def write_json(path: Path, payload: Any) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
++
++
++def normalize_text(value: Any) -> str:
++    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
++
++
++def option_map(choices: list[str]) -> dict[str, str]:
++    return {letter: choice for letter, choice in zip(LETTERS, choices)}
++
++
++def parse_prompt_options(prompt: Any) -> dict[str, str]:
++    matches = re.findall(
++        r"(?:^|\n)\s*([ABCD])\.\s*(.*?)(?=(?:\n\s*[ABCD]\.)|$)",
++        str(prompt or ""),
++        flags=re.S,
++    )
++    return {letter: text.strip() for letter, text in matches}
++
++
++def render_prompt(question: str, choices: list[str]) -> str:
++    lines = [
++        "<image> ",
++        (
++            f"{question} Choose the correct answer from the options below and respond with only the "
++            "corresponding option letter (A, B, C, or D). Do not include any explanation or extra text. "
++        ),
++        "Options:",
++    ]
++    lines.extend(f"{letter}. {choice}" for letter, choice in zip(LETTERS, choices))
++    return "\n".join(lines)
++
++
++def source_json_path(source: dict[str, Any]) -> Path:
++    raw = Path(str(source.get("json_file") or ""))
++    if raw.is_absolute():
++        return raw
++    return PHYSX_ROOT / raw
++
++
++def annotation_part_names(source: dict[str, Any], cache: dict[str, list[str]]) -> list[str]:
++    path = source_json_path(source)
++    key = str(path)
++    if key not in cache:
++        annotation = parse_annotation(path)
++        cache[key] = annotation.part_names
++    return cache[key]
++
++
++def ordered_choices_with_answer(answer_text: str, all_choices: list[str], answer_index: int) -> tuple[list[str], int]:
++    if answer_text not in all_choices:
++        raise ValueError(f"answer_text not in all_choices: {answer_text!r}")
++    if not 0 <= int(answer_index) <= 3:
++        raise ValueError(f"invalid answer_index: {answer_index!r}")
++    answer_index = int(answer_index)
++    distractors = [choice for choice in all_choices if normalize_choice(choice) != normalize_choice(answer_text)]
++    if len(distractors) != 3:
++        raise ValueError(f"expected exactly 3 distractors for {answer_text!r}, got {distractors!r}")
++    choices: list[str] = []
++    it = iter(distractors)
++    for idx in range(4):
++        choices.append(answer_text if idx == answer_index else next(it))
++    return choices, answer_index
++
++
++def joint_conflict_reasons(choices: list[str]) -> list[str]:
++    opts = option_map(choices)
++    reasons: list[str] = []
++    normalized = {letter: f" {normalize_text(text)} " for letter, text in opts.items()}
++    for name, terms in JOINT_CONFLICT_GROUPS.items():
++        term_letters: dict[str, set[str]] = collections.defaultdict(set)
++        for letter, text in normalized.items():
++            for term in terms:
++                if f" {term} " in text:
++                    term_letters[term].add(letter)
++        matched_terms = [term for term, letters in term_letters.items() if letters]
++        matched_letters = set().union(*(term_letters[term] for term in matched_terms)) if matched_terms else set()
++        if len(matched_terms) >= 2 and len(matched_letters) >= 2:
++            reasons.append(name)
++
++    texts = [normalize_text(choice) for choice in choices]
++    has_compound = any("prismatic and revolute" in text for text in texts)
++    has_single = any(text == "prismatic joint" or text == "revolute joint" for text in texts)
++    if has_compound and has_single:
++        reasons.append("compound_prismatic_revolute_vs_single")
++    has_rigid = any("rigid joint" in text for text in texts)
++    has_no_constraint = any("no movement" in text or "no constraint" in text for text in texts)
++    if has_rigid and has_no_constraint:
++        reasons.append("rigid_vs_no_constraint")
++    return reasons
++
++
++def build_cleaned_sidecar_row(
++    original: dict[str, Any],
++    *,
++    choices: list[str],
++    answer_index: int,
++    cleaning_reason: str,
++    cleaning_notes: dict[str, Any],
++) -> dict[str, Any]:
++    answer = choices[answer_index]
++    source = dict(original.get("source") or {})
++    clean_meta = {
++        "version": "physx_cleaned_options_v1",
++        "original_id": original.get("id"),
++        "original_answer": original.get("answer"),
++        "original_answer_index": original.get("answer_index"),
++        "original_choices": original.get("choices"),
++        "cleaning_reason": cleaning_reason,
++        **cleaning_notes,
++    }
++    source["cleaning"] = clean_meta
++    row = dict(original)
++    row.update(
++        {
++            "choices": choices,
++            "answer": answer,
++            "answer_index": answer_index,
++            "source": source,
++            "cleaning_version": "physx_cleaned_options_v1",
++            "original_id": original.get("id"),
++            "original_answer": original.get("answer"),
++            "original_answer_index": original.get("answer_index"),
++            "original_choices": original.get("choices"),
++            "cleaning_reason": cleaning_reason,
++        }
++    )
++    return row
++
++
++def build_verl_row(sidecar_row: dict[str, Any], original_verl_row: dict[str, Any]) -> dict[str, Any]:
++    answer_letter = LETTERS[int(sidecar_row["answer_index"])]
++    return {
++        "prompt": render_prompt(str(sidecar_row.get("question") or ""), sidecar_row["choices"]),
++        "image_path": original_verl_row.get("image_path"),
++        "answer": answer_letter,
++        "source": "physxnet_mcq_cleaned_options_v1",
++        "id": sidecar_row["id"],
++    }
++
++
++def clean_joint(row: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
++    source = row.get("source") or {}
++    raw_label = str(source.get("kinematic_type_raw") or "")
++    answer_text = JOINT_RAW_TO_CANONICAL.get(raw_label)
++    if answer_text is None:
++        return None, "joint_type_unknown_raw_label"
++    choices, answer_index = ordered_choices_with_answer(
++        answer_text=answer_text,
++        all_choices=JOINT_CANONICAL_OPTIONS,
++        answer_index=int(row["answer_index"]),
++    )
++    reasons = joint_conflict_reasons(row.get("choices") or [])
++    return (
++        build_cleaned_sidecar_row(
++            row,
++            choices=choices,
++            answer_index=answer_index,
++            cleaning_reason="joint_type_canonical_mutually_exclusive",
++            cleaning_notes={
++                "joint_raw_label": raw_label,
++                "joint_canonical_label": answer_text,
++                "original_conflict_reasons": reasons,
++            },
++        ),
++        None,
++    )
++
++
++def clean_movable(row: dict[str, Any], part_cache: dict[str, list[str]]) -> tuple[dict[str, Any] | None, str | None]:
++    answer = str(row.get("answer") or "").strip()
++    source = row.get("source") or {}
++    part_names = annotation_part_names(source, part_cache)
++    answer_key = normalize_choice(answer)
++    distractors: list[str] = []
++    seen = {answer_key}
++    for name in part_names:
++        key = normalize_choice(name)
++        if not key or key in seen:
++            continue
++        seen.add(key)
++        distractors.append(name)
++    if len(distractors) < 3:
++        return None, "movable_part_not_enough_same_object_distractors"
++    answer_index = int(row["answer_index"])
++    choices: list[str] = []
++    distractor_iter = iter(distractors[:3])
++    for idx in range(4):
++        choices.append(answer if idx == answer_index else next(distractor_iter))
++    return (
++        build_cleaned_sidecar_row(
++            row,
++            choices=choices,
++            answer_index=answer_index,
++            cleaning_reason="movable_part_same_object_distractors",
++            cleaning_notes={
++                "same_object_part_count": len(part_names),
++                "same_object_distractor_count": len(distractors),
++            },
++        ),
++        None,
++    )
++
++
++def safe_prediction(record: dict[str, Any]) -> str:
++    return str(record.get("prediction") or record.get("pred") or "unknown")
++
++
++def safe_answer(record: dict[str, Any]) -> str:
++    return str(record.get("answer") or record.get("ground_truth") or "")
++
++
++def load_prediction_groups(path: Path | None) -> dict[str, list[dict[str, Any]]]:
++    if path is None or not path.exists():
++        return {}
++    groups: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
++    for row in read_jsonl(path):
++        key = str(row.get("index") or row.get("id") or "")
++        if key:
++            groups[key].append(row)
++    return dict(groups)
++
++
++def accuracy_for_ids(predictions: dict[str, list[dict[str, Any]]], ids: set[str]) -> dict[str, Any]:
++    rows = [group[0] for key, group in predictions.items() if key in ids and group]
++    n = len(rows)
++    correct = sum(1 for row in rows if safe_prediction(row) == safe_answer(row))
++    invalid = sum(1 for row in rows if safe_prediction(row) == "unknown")
++    hitmax = sum(1 for row in rows if bool(row.get("hit_max_response_length")))
++    confusion: collections.Counter[tuple[str, str]] = collections.Counter(
++        (safe_answer(row), safe_prediction(row)) for row in rows
++    )
++    return {
++        "num_records": n,
++        "accuracy": correct / n if n else None,
++        "invalid_rate": invalid / n if n else None,
++        "hit_max_response_length_rate": hitmax / n if n else None,
++        "confusion": {f"{answer}->{pred}": count for (answer, pred), count in sorted(confusion.items())},
++    }
++
++
++def vote8_for_ids(groups: dict[str, list[dict[str, Any]]], ids: set[str]) -> dict[str, Any]:
++    selected = {key: group for key, group in groups.items() if key in ids}
++    n = len(selected)
++    majority_correct = 0
++    high_conf_wrong = 0
++    high_conf_all = 0
++    pass_at_votes = 0
++    majority_counts: collections.Counter[int] = collections.Counter()
++    for group in selected.values():
++        preds = [safe_prediction(row) for row in group]
++        counts = collections.Counter(preds)
++        majority_pred, majority_count = counts.most_common(1)[0]
++        answer = safe_answer(group[0])
++        majority_counts[majority_count] += 1
++        majority_correct += int(majority_pred == answer)
++        high_conf = majority_count / len(group) >= 0.75 if group else False
++        high_conf_all += int(high_conf)
++        high_conf_wrong += int(high_conf and majority_pred != answer)
++        pass_at_votes += int(any(pred == answer for pred in preds))
++    return {
++        "num_groups": n,
++        "majority_accuracy": majority_correct / n if n else None,
++        "high_confidence_wrong_count": high_conf_wrong,
++        "high_confidence_all_count": high_conf_all,
++        "pass_at_votes": pass_at_votes / n if n else None,
++        "majority_count_distribution": dict(sorted(majority_counts.items())),
++    }
++
++
++def pct(value: float | None) -> str:
++    return "n/a" if value is None else f"{value:.6f}"
++
++
++def render_audit_markdown(summary: dict[str, Any]) -> str:
++    lines = [
++        "# PhysX Cleaned Options V1 Audit",
++        "",
++        "## Dataset",
++        "",
++        f"- Original rows: {summary['original_counts']['total']}",
++        f"- Cleaned rows: {summary['cleaned_counts']['total']}",
++        f"- Output dir: `{summary['output_dir']}`",
++        "",
++        "## Question Types",
++        "",
++        "| question_type | original | cleaned | skipped |",
++        "| --- | ---: | ---: | ---: |",
++    ]
++    qtypes = sorted(set(summary["original_counts"]["by_question_type"]) | set(summary["cleaned_counts"]["by_question_type"]))
++    for qtype in qtypes:
++        original = summary["original_counts"]["by_question_type"].get(qtype, 0)
++        cleaned = summary["cleaned_counts"]["by_question_type"].get(qtype, 0)
++        skipped = summary["skipped_by_question_type"].get(qtype, 0)
++        lines.append(f"| {qtype} | {original} | {cleaned} | {skipped} |")
++
++    lines.extend(["", "## Skipped Reasons", ""])
++    if summary["skipped_reasons"]:
++        for reason, count in sorted(summary["skipped_reasons"].items()):
++            lines.append(f"- {reason}: {count}")
++    else:
++        lines.append("- none")
++
++    lines.extend(["", "## Original Fixed Step0 On Retained IDs", ""])
++    lines.append("| question_type | n | acc | invalid | hitmax |")
++    lines.append("| --- | ---: | ---: | ---: | ---: |")
++    for qtype, row in sorted(summary["original_fixed_step0_retained"].items()):
++        lines.append(
++            f"| {qtype} | {row['num_records']} | {pct(row['accuracy'])} | "
++            f"{pct(row['invalid_rate'])} | {pct(row['hit_max_response_length_rate'])} |"
++        )
++
++    lines.extend(["", "## Original Vote8 On Retained IDs", ""])
++    lines.append("| question_type | groups | majority_acc | pass@8 | high_conf_wrong | high_conf_all |")
++    lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
++    for qtype, row in sorted(summary["original_vote8_retained"].items()):
++        lines.append(
++            f"| {qtype} | {row['num_groups']} | {pct(row['majority_accuracy'])} | "
++            f"{pct(row['pass_at_votes'])} | {row['high_confidence_wrong_count']} | "
++            f"{row['high_confidence_all_count']} |"
++        )
++
++    lines.extend(["", "## Cleaning Reasons", ""])
++    for reason, count in sorted(summary["cleaning_reasons"].items()):
++        lines.append(f"- {reason}: {count}")
++    lines.append("")
++    return "\n".join(lines)
++
++
++def validate_cleaned(cleaned_verl: list[dict[str, Any]], cleaned_sidecar: list[dict[str, Any]]) -> dict[str, Any]:
++    issues: collections.Counter[str] = collections.Counter()
++    sidecar_by_id = {row.get("id"): row for row in cleaned_sidecar}
++    seen: set[str] = set()
++    for item in cleaned_verl:
++        item_id = item.get("id")
++        if not item_id:
++            issues["missing_id"] += 1
++            continue
++        if item_id in seen:
++            issues["duplicate_id"] += 1
++        seen.add(str(item_id))
++        side = sidecar_by_id.get(item_id)
++        if side is None:
++            issues["missing_sidecar"] += 1
++            continue
++        prompt_options = parse_prompt_options(item.get("prompt"))
++        if set(prompt_options) != set(LETTERS):
++            issues["malformed_prompt_options"] += 1
++        choices = side.get("choices")
++        if not isinstance(choices, list) or len(choices) != 4:
++            issues["invalid_sidecar_choices"] += 1
++            continue
++        if len({normalize_choice(choice) for choice in choices}) != 4:
++            issues["duplicate_choices"] += 1
++        answer_index = side.get("answer_index")
++        if not isinstance(answer_index, int) or not 0 <= answer_index <= 3:
++            issues["invalid_answer_index"] += 1
++            continue
++        if item.get("answer") != LETTERS[answer_index]:
++            issues["answer_letter_mismatch"] += 1
++        if normalize_choice(side.get("answer")) != normalize_choice(choices[answer_index]):
++            issues["answer_text_mismatch"] += 1
++        for letter, choice in zip(LETTERS, choices):
++            if normalize_choice(prompt_options.get(letter)) != normalize_choice(choice):
++                issues["prompt_sidecar_choice_mismatch"] += 1
++                break
++        source = side.get("source") or {}
++        cleaning = source.get("cleaning") or {}
++        if not cleaning.get("original_id"):
++            issues["missing_original_id"] += 1
++    if set(sidecar_by_id) - seen:
++        issues["sidecar_rows_not_in_dataset"] += len(set(sidecar_by_id) - seen)
++    return {"issues": dict(issues), "ok": not issues}
++
++
++def build(args: argparse.Namespace) -> dict[str, Any]:
++    dataset = read_json(args.dataset_path)
++    sidecar_rows = read_jsonl(args.sidecar_path)
++    verl_by_id = {row["id"]: row for row in dataset}
++    part_cache: dict[str, list[str]] = {}
++
++    cleaned_sidecar: list[dict[str, Any]] = []
++    cleaned_verl: list[dict[str, Any]] = []
++    skipped: list[dict[str, Any]] = []
++    original_counts: collections.Counter[str] = collections.Counter()
++    cleaned_counts: collections.Counter[str] = collections.Counter()
++    skipped_qtypes: collections.Counter[str] = collections.Counter()
++    skipped_reasons: collections.Counter[str] = collections.Counter()
++    cleaning_reasons: collections.Counter[str] = collections.Counter()
++    joint_conflicts: collections.Counter[str] = collections.Counter()
++
++    for row in sidecar_rows:
++        qtype = str(row.get("question_type") or "unknown")
++        original_counts[qtype] += 1
++        if qtype == "joint_type":
++            for reason in joint_conflict_reasons(row.get("choices") or []):
++                joint_conflicts[reason] += 1
++            cleaned, reason = clean_joint(row)
++        elif qtype == "movable_part":
++            cleaned, reason = clean_movable(row, part_cache)
++        else:
++            cleaned, reason = None, "object_category_not_in_cleaned_v1"
++
++        if cleaned is None:
++            skipped_reasons[reason or "unknown"] += 1
++            skipped_qtypes[qtype] += 1
++            skipped.append(
++                {
++                    "id": row.get("id"),
++                    "question_type": qtype,
++                    "reason": reason or "unknown",
++                    "object_id": row.get("object_id"),
++                    "answer": row.get("answer"),
++                    "choices": row.get("choices"),
++                }
++            )
++            continue
++
++        original_verl = verl_by_id.get(row["id"])
++        if original_verl is None:
++            skipped_reasons["missing_verl_row"] += 1
++            skipped_qtypes[qtype] += 1
++            skipped.append({"id": row.get("id"), "question_type": qtype, "reason": "missing_verl_row"})
++            continue
++
++        cleaned_sidecar.append(cleaned)
++        cleaned_verl.append(build_verl_row(cleaned, original_verl))
++        cleaned_counts[qtype] += 1
++        cleaning_reasons[str(cleaned.get("cleaning_reason"))] += 1
++
++    out_dir = args.output_dir
++    out_dir.mkdir(parents=True, exist_ok=True)
++    dataset_path = out_dir / "physxnet_mcq_verl_cleaned_options.json"
++    sidecar_path = out_dir / "physxnet_mcq_cleaned_options.jsonl"
++    skipped_path = out_dir / "skipped_cleaning_cases.jsonl"
++    dataset_path.write_text(json.dumps(cleaned_verl, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
++    with sidecar_path.open("w", encoding="utf-8") as handle:
++        for row in cleaned_sidecar:
++            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
++    with skipped_path.open("w", encoding="utf-8") as handle:
++        for row in skipped:
++            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
++
++    retained_ids_by_qtype: dict[str, set[str]] = collections.defaultdict(set)
++    for row in cleaned_sidecar:
++        retained_ids_by_qtype[str(row.get("question_type") or "unknown")].add(str(row.get("id")))
++
++    fixed_predictions = {
++        "joint_type": load_prediction_groups(args.fixed_step0_dir / "joint_type_validation_predictions_step0.jsonl"),
++        "movable_part": load_prediction_groups(args.fixed_step0_dir / "movable_part_validation_predictions_step0.jsonl"),
++    }
++    vote_predictions = {
++        "joint_type": load_prediction_groups(args.joint_vote8_path),
++        "movable_part": load_prediction_groups(args.movable_vote8_path),
++    }
++    fixed_retained = {
++        qtype: accuracy_for_ids(groups, retained_ids_by_qtype.get(qtype, set()))
++        for qtype, groups in fixed_predictions.items()
++    }
++    vote_retained = {
++        qtype: vote8_for_ids(groups, retained_ids_by_qtype.get(qtype, set()))
++        for qtype, groups in vote_predictions.items()
++    }
++
++    validation = validate_cleaned(cleaned_verl, cleaned_sidecar)
++    summary = {
++        "version": "physx_cleaned_options_v1",
++        "output_dir": str(out_dir),
++        "dataset_path": str(dataset_path),
++        "sidecar_path": str(sidecar_path),
++        "skipped_path": str(skipped_path),
++        "original_dataset_path": str(args.dataset_path),
++        "original_sidecar_path": str(args.sidecar_path),
++        "original_counts": {
++            "total": len(sidecar_rows),
++            "by_question_type": dict(sorted(original_counts.items())),
++        },
++        "cleaned_counts": {
++            "total": len(cleaned_sidecar),
++            "by_question_type": dict(sorted(cleaned_counts.items())),
++        },
++        "skipped_by_question_type": dict(sorted(skipped_qtypes.items())),
++        "skipped_reasons": dict(sorted(skipped_reasons.items())),
++        "cleaning_reasons": dict(sorted(cleaning_reasons.items())),
++        "joint_original_conflict_reasons": dict(sorted(joint_conflicts.items())),
++        "validation": validation,
++        "original_fixed_step0_retained": fixed_retained,
++        "original_vote8_retained": vote_retained,
++    }
++    write_json(out_dir / "cleaning_manifest.json", summary)
++    (out_dir / "badcase_summary.md").write_text(render_audit_markdown(summary), encoding="utf-8")
++    write_json(out_dir / "badcase_summary.json", summary)
++    return summary
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--dataset-path", type=Path, default=DEFAULT_DATASET)
++    parser.add_argument("--sidecar-path", type=Path, default=DEFAULT_SIDECAR)
++    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
++    parser.add_argument("--fixed-step0-dir", type=Path, default=DEFAULT_FIXED_STEP0)
++    parser.add_argument("--joint-vote8-path", type=Path, default=DEFAULT_JOINT_VOTE8)
++    parser.add_argument("--movable-vote8-path", type=Path, default=DEFAULT_MOVABLE_VOTE8)
++    return parser.parse_args()
++
++
++def main() -> int:
++    args = parse_args()
++    summary = build(args)
++    print(json.dumps(summary, ensure_ascii=False, indent=2))
++    if not summary["validation"]["ok"]:
++        return 1
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/scripts/build_physx_cleaned_options_v2_candidates.py b/scripts/build_physx_cleaned_options_v2_candidates.py
+new file mode 100644
+index 0000000..b92c960
+--- /dev/null
++++ b/scripts/build_physx_cleaned_options_v2_candidates.py
+@@ -0,0 +1,470 @@
++#!/usr/bin/env python3
++"""Build data-side PhysX-MCQ v2 candidate subsets.
++
++These candidates keep the existing VERL/sidecar schema and write new files under
++outputs/. They are intended for data-quality experiments, not for changing the
++original PhysXNet data.
++"""
++
++from __future__ import annotations
++
++import argparse
++import collections
++import hashlib
++import json
++import random
++import re
++from pathlib import Path
++from typing import Any
++
++LETTERS = "ABCD"
++
++TTRV_ROOT = Path(__file__).resolve().parents[2]
++DEFAULT_V1_DIR = TTRV_ROOT / "outputs" / "physx_cleaned_options_v1"
++DEFAULT_OUTPUT_DIR = TTRV_ROOT / "outputs" / "physx_cleaned_options_v2_candidates"
++DEFAULT_V1_VERL = DEFAULT_V1_DIR / "physxnet_mcq_verl_cleaned_options.json"
++DEFAULT_V1_SIDECAR = DEFAULT_V1_DIR / "physxnet_mcq_cleaned_options.jsonl"
++DEFAULT_STEP0 = DEFAULT_V1_DIR / "fixed_step0_caches" / "combined_validation_predictions_step0.jsonl"
++
++JOINT_PLAIN_OPTIONS = [
++    "stationary or fixed joint (no relative motion)",
++    "sliding joint (linear motion)",
++    "rotating hinge joint",
++    "combined sliding and rotating joint",
++]
++JOINT_RAW_TO_PLAIN = {
++    "A": "stationary or fixed joint (no relative motion)",
++    "E": "stationary or fixed joint (no relative motion)",
++    "B": "sliding joint (linear motion)",
++    "C": "rotating hinge joint",
++    "D": "rotating hinge joint",
++    "CB": "combined sliding and rotating joint",
++}
++
++VISIBLE_PART_TERMS = {
++    "button",
++    "cabinet door",
++    "cover",
++    "cover lid",
++    "display",
++    "display screen",
++    "door",
++    "drawer",
++    "handle",
++    "hose",
++    "hour hand",
++    "lamp head",
++    "lid",
++    "light bulb",
++    "minute hand",
++    "screen",
++    "spout",
++    "switch",
++}
++BAD_PART_TERMS = {
++    "book",
++    "liquid",
++    "plant",
++    "pillow",
++    "soil",
++}
++GENERIC_PART_RE = re.compile(r"\b(surface|support|base|bar|connector|panel|other|component)\b", re.I)
++
++
++def read_json(path: Path) -> Any:
++    with path.open("r", encoding="utf-8") as handle:
++        return json.load(handle)
++
++
++def read_jsonl(path: Path) -> list[dict[str, Any]]:
++    rows = []
++    with path.open("r", encoding="utf-8") as handle:
++        for line in handle:
++            if line.strip():
++                rows.append(json.loads(line))
++    return rows
++
++
++def write_json(path: Path, payload: Any) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
++
++
++def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    with path.open("w", encoding="utf-8") as handle:
++        for row in rows:
++            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
++
++
++def normalize_text(value: Any) -> str:
++    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
++
++
++def display_part_label(value: Any) -> str:
++    text = str(value or "").strip()
++    text = re.sub(r"^\d+[_\-\s]+", "", text)
++    text = text.replace("_", " ")
++    text = re.sub(r"\s+", " ", text).strip()
++    return text
++
++
++def stable_shuffle(values: list[str], key: str, seed: int) -> list[str]:
++    shuffled = values[:]
++    digest = hashlib.sha256(f"{seed}:{key}".encode("utf-8")).hexdigest()
++    rng = random.Random(int(digest[:16], 16))
++    rng.shuffle(shuffled)
++    return shuffled
++
++
++def render_prompt(question: str, choices: list[str]) -> str:
++    lines = [
++        "<image> ",
++        (
++            f"{question} Choose the correct answer from the options below and respond with only the "
++            "corresponding option letter (A, B, C, or D). Do not include any explanation or extra text. "
++        ),
++        "Options:",
++    ]
++    lines.extend(f"{letter}. {choice}" for letter, choice in zip(LETTERS, choices))
++    return "\n".join(lines)
++
++
++def is_visible_part_label(text: Any) -> bool:
++    norm = normalize_text(text)
++    return any(term in norm for term in VISIBLE_PART_TERMS)
++
++
++def is_bad_part_label(text: Any) -> bool:
++    norm = normalize_text(text)
++    return any(term in norm for term in BAD_PART_TERMS)
++
++
++def generic_choice_count(choices: list[str]) -> int:
++    return sum(1 for choice in choices if GENERIC_PART_RE.search(choice))
++
++
++def load_prediction_map(path: Path) -> dict[str, dict[str, Any]]:
++    if not path.exists():
++        return {}
++    return {str(row.get("index") or row.get("id")): row for row in read_jsonl(path)}
++
++
++def retained_estimate(rows: list[dict[str, Any]], predictions: dict[str, dict[str, Any]]) -> dict[str, Any]:
++    total = 0
++    correct = 0
++    invalid = 0
++    hitmax = 0
++    by_qtype: dict[str, collections.Counter[str]] = collections.defaultdict(collections.Counter)
++    by_reason: dict[str, collections.Counter[str]] = collections.defaultdict(collections.Counter)
++    for row in rows:
++        pred = predictions.get(str(row.get("id")))
++        if pred is None:
++            continue
++        total += 1
++        prediction = str(pred.get("prediction") or pred.get("pred") or "unknown")
++        cleaning_v2 = (row.get("source") or {}).get("cleaning_v2") or {}
++        answer = str(cleaning_v2.get("original_v1_answer_letter") or LETTERS[int(row["answer_index"])])
++        is_correct = prediction == answer
++        is_invalid = prediction == "unknown"
++        is_hitmax = bool(pred.get("hit_max_response_length"))
++        correct += int(is_correct)
++        invalid += int(is_invalid)
++        hitmax += int(is_hitmax)
++        for key in (str(row.get("question_type") or "unknown"),):
++            by_qtype[key]["n"] += 1
++            by_qtype[key]["correct"] += int(is_correct)
++            by_qtype[key]["invalid"] += int(is_invalid)
++            by_qtype[key]["hitmax"] += int(is_hitmax)
++        reason = str(row.get("v2_reason") or "unknown")
++        by_reason[reason]["n"] += 1
++        by_reason[reason]["correct"] += int(is_correct)
++        by_reason[reason]["invalid"] += int(is_invalid)
++        by_reason[reason]["hitmax"] += int(is_hitmax)
++
++    def pack(counter: collections.Counter[str]) -> dict[str, Any]:
++        n = counter["n"]
++        return {
++            "n": n,
++            "accuracy": counter["correct"] / n if n else None,
++            "invalid_rate": counter["invalid"] / n if n else None,
++            "hit_max_response_length_rate": counter["hitmax"] / n if n else None,
++        }
++
++    return {
++        "note": "This uses v1 step0 predictions and original v1 answer letters on retained ids. It estimates subset quality only; rephrased/reordered prompts need a fresh static evaluation.",
++        "n": total,
++        "accuracy": correct / total if total else None,
++        "invalid_rate": invalid / total if total else None,
++        "hit_max_response_length_rate": hitmax / total if total else None,
++        "by_question_type": {key: pack(value) for key, value in sorted(by_qtype.items())},
++        "by_v2_reason": {key: pack(value) for key, value in sorted(by_reason.items())},
++    }
++
++
++def build_verl_row(sidecar_row: dict[str, Any], old_verl_by_id: dict[str, dict[str, Any]]) -> dict[str, Any]:
++    old = old_verl_by_id[sidecar_row["id"]]
++    return {
++        "prompt": render_prompt(str(sidecar_row.get("question") or ""), sidecar_row["choices"]),
++        "image_path": old.get("image_path"),
++        "answer": LETTERS[int(sidecar_row["answer_index"])],
++        "source": "physxnet_mcq_cleaned_options_v2_candidate",
++        "id": sidecar_row["id"],
++    }
++
++
++def make_joint_row(row: dict[str, Any], variant: str, seed: int) -> tuple[dict[str, Any] | None, str | None]:
++    source = row.get("source") or {}
++    raw_label = str(source.get("kinematic_type_raw") or "")
++    if variant in {"pragmatic_plain_balanced", "joint_plain_no_static"} and raw_label == "A":
++        return None, "drop_static_no_movement_joint"
++    if variant in {"diagnostic_motion_reliable", "joint_motion_reliable"} and raw_label not in {"C", "D", "CB"}:
++        return None, "drop_low_reliability_static_or_prismatic_joint"
++    answer = JOINT_RAW_TO_PLAIN.get(raw_label)
++    if answer is None:
++        return None, "unknown_joint_raw_label"
++    choices = stable_shuffle(JOINT_PLAIN_OPTIONS, str(row["id"]), seed)
++    answer_index = choices.index(answer)
++    out = dict(row)
++    src = dict(source)
++    v2 = {
++        "version": "physx_cleaned_options_v2_candidate",
++        "parent_cleaning_version": row.get("cleaning_version"),
++        "v2_variant": variant,
++        "v2_reason": "joint_plain_language_no_static" if raw_label != "A" else "joint_plain_language",
++        "original_v1_answer": row.get("answer"),
++        "original_v1_answer_index": row.get("answer_index"),
++        "original_v1_answer_letter": LETTERS[int(row["answer_index"])],
++        "original_v1_choices": row.get("choices"),
++        "joint_raw_label": raw_label,
++    }
++    src["cleaning_v2"] = v2
++    out.update(
++        {
++            "choices": choices,
++            "answer": answer,
++            "answer_index": answer_index,
++            "source": src,
++            "cleaning_version": "physx_cleaned_options_v2_candidate",
++            "v2_variant": variant,
++            "v2_reason": v2["v2_reason"],
++            "v2_parent_id": row.get("id"),
++        }
++    )
++    return out, None
++
++
++def make_movable_row(row: dict[str, Any], variant: str, seed: int) -> tuple[dict[str, Any] | None, str | None]:
++    answer = str(row.get("answer") or "")
++    choices = [display_part_label(choice) for choice in row.get("choices") or []]
++    if len(choices) != 4:
++        return None, "invalid_movable_choices"
++    normalized = [normalize_text(choice) for choice in choices]
++    if len(set(normalized)) != 4:
++        return None, "duplicate_after_part_label_normalization"
++    if not is_visible_part_label(answer):
++        return None, "drop_low_visibility_answer_label"
++    if is_bad_part_label(answer):
++        return None, "drop_bad_answer_label"
++    if any(is_bad_part_label(choice) for choice in choices):
++        return None, "drop_bad_choice_label"
++    if generic_choice_count(choices) >= 3:
++        return None, "drop_too_many_generic_choice_labels"
++    answer_display = display_part_label(answer)
++    answer_norm = normalize_text(answer_display)
++    if answer_norm not in normalized:
++        return None, "answer_missing_after_normalization"
++    choices = stable_shuffle(choices, str(row["id"]), seed)
++    normalized = [normalize_text(choice) for choice in choices]
++    answer_index = normalized.index(answer_norm)
++    out = dict(row)
++    source = dict(row.get("source") or {})
++    v2 = {
++        "version": "physx_cleaned_options_v2_candidate",
++        "parent_cleaning_version": row.get("cleaning_version"),
++        "v2_variant": variant,
++        "v2_reason": "movable_visible_part_labels",
++        "original_v1_answer": row.get("answer"),
++        "original_v1_answer_index": row.get("answer_index"),
++        "original_v1_answer_letter": LETTERS[int(row["answer_index"])],
++        "original_v1_choices": row.get("choices"),
++    }
++    source["cleaning_v2"] = v2
++    out.update(
++        {
++            "choices": choices,
++            "answer": answer_display,
++            "answer_index": answer_index,
++            "source": source,
++            "cleaning_version": "physx_cleaned_options_v2_candidate",
++            "v2_variant": variant,
++            "v2_reason": v2["v2_reason"],
++            "v2_parent_id": row.get("id"),
++        }
++    )
++    return out, None
++
++
++def make_variant(
++    *,
++    variant: str,
++    sidecar_rows: list[dict[str, Any]],
++    old_verl_by_id: dict[str, dict[str, Any]],
++    predictions: dict[str, dict[str, Any]],
++    output_dir: Path,
++    seed: int,
++) -> dict[str, Any]:
++    kept: list[dict[str, Any]] = []
++    skipped: list[dict[str, Any]] = []
++    for row in sidecar_rows:
++        qtype = str(row.get("question_type") or "")
++        if variant in {"joint_plain_no_static", "joint_motion_reliable"} and qtype != "joint_type":
++            skipped.append({"id": row.get("id"), "question_type": qtype, "reason": "variant_excludes_question_type"})
++            continue
++        if variant == "movable_visible_strict" and qtype != "movable_part":
++            skipped.append({"id": row.get("id"), "question_type": qtype, "reason": "variant_excludes_question_type"})
++            continue
++        if qtype == "joint_type":
++            new_row, reason = make_joint_row(row, variant, seed)
++        elif qtype == "movable_part":
++            new_row, reason = make_movable_row(row, variant, seed)
++        else:
++            new_row, reason = None, "unsupported_question_type"
++        if new_row is None:
++            skipped.append({"id": row.get("id"), "question_type": qtype, "reason": reason or "unknown"})
++        else:
++            kept.append(new_row)
++
++    variant_dir = output_dir / variant
++    sidecar_path = variant_dir / f"physxnet_mcq_{variant}.jsonl"
++    verl_path = variant_dir / f"physxnet_mcq_verl_{variant}.json"
++    skipped_path = variant_dir / "skipped_v2_candidate_cases.jsonl"
++    manifest_path = variant_dir / "manifest.json"
++    report_path = variant_dir / "retained_step0_estimate.md"
++    kept_verl = [build_verl_row(row, old_verl_by_id) for row in kept]
++    estimate = retained_estimate(kept, predictions)
++    skipped_reasons = collections.Counter(str(row["reason"]) for row in skipped)
++    kept_qtypes = collections.Counter(str(row.get("question_type") or "unknown") for row in kept)
++    manifest = {
++        "variant": variant,
++        "seed": seed,
++        "num_kept": len(kept),
++        "num_skipped": len(skipped),
++        "kept_by_question_type": dict(sorted(kept_qtypes.items())),
++        "skipped_reasons": dict(sorted(skipped_reasons.items())),
++        "dataset_path": str(verl_path),
++        "sidecar_path": str(sidecar_path),
++        "skipped_path": str(skipped_path),
++        "retained_step0_estimate": estimate,
++    }
++    write_jsonl(sidecar_path, kept)
++    write_json(verl_path, kept_verl)
++    write_jsonl(skipped_path, skipped)
++    write_json(manifest_path, manifest)
++    report_path.write_text(render_report(manifest), encoding="utf-8")
++    return manifest
++
++
++def fmt(value: Any) -> str:
++    if value is None:
++        return "n/a"
++    if isinstance(value, float):
++        return f"{value:.4f}"
++    return str(value)
++
++
++def render_report(manifest: dict[str, Any]) -> str:
++    estimate = manifest["retained_step0_estimate"]
++    lines = [
++        f"# {manifest['variant']} retained step0 estimate",
++        "",
++        estimate["note"],
++        "",
++        f"- kept: {manifest['num_kept']}",
++        f"- skipped: {manifest['num_skipped']}",
++        f"- retained-id acc: {fmt(estimate['accuracy'])}",
++        f"- invalid: {fmt(estimate['invalid_rate'])}",
++        f"- hit_max: {fmt(estimate['hit_max_response_length_rate'])}",
++        "",
++        "## By Question Type",
++        "",
++        "| question_type | n | acc | invalid | hit_max |",
++        "| --- | ---: | ---: | ---: | ---: |",
++    ]
++    for key, row in estimate["by_question_type"].items():
++        lines.append(
++            f"| {key} | {row['n']} | {fmt(row['accuracy'])} | "
++            f"{fmt(row['invalid_rate'])} | {fmt(row['hit_max_response_length_rate'])} |"
++        )
++    lines.extend(["", "## Skipped Reasons", ""])
++    for key, value in manifest["skipped_reasons"].items():
++        lines.append(f"- {key}: {value}")
++    lines.append("")
++    return "\n".join(lines)
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--v1-dataset", type=Path, default=DEFAULT_V1_VERL)
++    parser.add_argument("--v1-sidecar", type=Path, default=DEFAULT_V1_SIDECAR)
++    parser.add_argument("--step0-predictions", type=Path, default=DEFAULT_STEP0)
++    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
++    parser.add_argument("--seed", type=int, default=13)
++    args = parser.parse_args()
++
++    v1_verl = read_json(args.v1_dataset)
++    v1_sidecar = read_jsonl(args.v1_sidecar)
++    old_verl_by_id = {str(row["id"]): row for row in v1_verl}
++    predictions = load_prediction_map(args.step0_predictions)
++    args.output_dir.mkdir(parents=True, exist_ok=True)
++
++    variants = [
++        "pragmatic_plain_balanced",
++        "joint_plain_no_static",
++        "joint_motion_reliable",
++        "movable_visible_strict",
++    ]
++    manifests = [
++        make_variant(
++            variant=variant,
++            sidecar_rows=v1_sidecar,
++            old_verl_by_id=old_verl_by_id,
++            predictions=predictions,
++            output_dir=args.output_dir,
++            seed=args.seed,
++        )
++        for variant in variants
++    ]
++    summary = {
++        "source_v1_dataset": str(args.v1_dataset),
++        "source_v1_sidecar": str(args.v1_sidecar),
++        "step0_predictions": str(args.step0_predictions),
++        "output_dir": str(args.output_dir),
++        "variants": manifests,
++    }
++    write_json(args.output_dir / "summary.json", summary)
++    lines = [
++        "# PhysX Cleaned Options V2 Candidate Summary",
++        "",
++        "All variants keep the VERL/sidecar schema and write new files only under this output directory.",
++        "Retained-id metrics are computed with v1 step0 predictions and original v1 answer letters; rephrased/reordered prompts require a fresh static eval.",
++        "",
++        "| variant | kept | joint | movable | retained acc | invalid | hit_max |",
++        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
++    ]
++    for manifest in manifests:
++        estimate = manifest["retained_step0_estimate"]
++        q = manifest["kept_by_question_type"]
++        lines.append(
++            f"| {manifest['variant']} | {manifest['num_kept']} | {q.get('joint_type', 0)} | "
++            f"{q.get('movable_part', 0)} | {fmt(estimate['accuracy'])} | "
++            f"{fmt(estimate['invalid_rate'])} | {fmt(estimate['hit_max_response_length_rate'])} |"
++        )
++    lines.append("")
++    (args.output_dir / "summary.md").write_text("\n".join(lines), encoding="utf-8")
++    print(args.output_dir / "summary.md")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/scripts/build_reliable_adapt20_parquet.py b/scripts/build_reliable_adapt20_parquet.py
+new file mode 100644
+index 0000000..3f72ff0
+--- /dev/null
++++ b/scripts/build_reliable_adapt20_parquet.py
+@@ -0,0 +1,327 @@
++#!/usr/bin/env python3
++"""Build per-question-type parquet curricula from reliable step0 predictions.
++
++The script keeps validation full-size for the selected question type, and only
++reorders the training parquet so that the first N rows are reliable adaptation
++examples. It does not modify any source dataset.
++"""
++
++from __future__ import annotations
++
++import argparse
++import json
++import re
++from collections import Counter
++from pathlib import Path
++from typing import Any
++
++import pandas as pd
++
++
++CHOICES = {"A", "B", "C", "D"}
++OPTION_RE = re.compile(r"(?m)^([A-D])\.\s*(.+)$")
++
++
++def read_jsonl(path: Path) -> list[dict[str, Any]]:
++    rows = []
++    with path.open("r", encoding="utf-8") as handle:
++        for line in handle:
++            if line.strip():
++                rows.append(json.loads(line))
++    return rows
++
++
++def extra(row: pd.Series) -> dict[str, Any]:
++    value = row.get("extra_info")
++    return value if isinstance(value, dict) else {}
++
++
++def row_id(row: pd.Series) -> str:
++    info = extra(row)
++    return str(info.get("id") or info.get("index") or "")
++
++
++def row_qtype(row: pd.Series) -> str:
++    return str(extra(row).get("question_type") or "")
++
++
++def row_answer(row: pd.Series) -> str:
++    reward = row.get("reward_model")
++    if isinstance(reward, dict) and reward.get("ground_truth"):
++        return str(reward.get("ground_truth")).strip().upper()
++    return str(extra(row).get("answer") or "").strip().upper()
++
++
++def prompt_content(row: pd.Series) -> str:
++    value = row.get("prompt")
++    try:
++        if len(value) and isinstance(value[0], dict):
++            return str(value[0].get("content") or "")
++    except Exception:
++        pass
++    if isinstance(value, list) and value and isinstance(value[0], dict):
++        return str(value[0].get("content") or "")
++    return str(value)
++
++
++def correct_option_text(row: pd.Series) -> str:
++    answer = row_answer(row)
++    options = dict(OPTION_RE.findall(prompt_content(row)))
++    return str(options.get(answer) or "").strip()
++
++
++def is_reliable(pred: dict[str, Any], answer: str, max_token_len: int) -> bool:
++    prediction = str(pred.get("prediction") or pred.get("pred") or "").strip().upper()
++    correct = pred.get("correct")
++    if correct is None:
++        correct = prediction == answer
++    token_len = pred.get("response_token_len")
++    try:
++        token_len_ok = int(token_len) <= max_token_len
++    except Exception:
++        token_len_ok = True
++    return (
++        prediction in CHOICES
++        and prediction == answer
++        and bool(correct)
++        and not bool(pred.get("hit_max_response_length"))
++        and token_len_ok
++    )
++
++
++def load_prediction_map(path: Path, qtype: str) -> dict[str, dict[str, Any]]:
++    out = {}
++    for pred in read_jsonl(path):
++        if qtype and str(pred.get("question_type") or "") != qtype:
++            continue
++        key = str(pred.get("index") or pred.get("id") or "")
++        if key:
++            out[key] = pred
++    return out
++
++
++def sort_key(item: tuple[int, pd.Series, dict[str, Any]]) -> tuple[Any, ...]:
++    idx, row, pred = item
++    info = extra(row)
++    raw = str(pred.get("prediction_raw") or "").strip()
++    answer = row_answer(row)
++    starts_with_answer = raw.upper().startswith(answer)
++    token_len = pred.get("response_token_len")
++    try:
++        token_len_i = int(token_len)
++    except Exception:
++        token_len_i = 999
++    return (
++        0 if starts_with_answer else 1,
++        token_len_i,
++        str(info.get("object_id") or ""),
++        int(info.get("dataset_index") or idx),
++    )
++
++
++def balanced_select(candidates: list[tuple[int, pd.Series, dict[str, Any]]], limit: int) -> list[tuple[int, pd.Series, dict[str, Any]]]:
++    by_answer: dict[str, list[tuple[int, pd.Series, dict[str, Any]]]] = {choice: [] for choice in sorted(CHOICES)}
++    for item in candidates:
++        answer = row_answer(item[1])
++        if answer in by_answer:
++            by_answer[answer].append(item)
++    for answer in by_answer:
++        by_answer[answer].sort(key=sort_key)
++
++    selected: list[tuple[int, pd.Series, dict[str, Any]]] = []
++    selected_ids: set[str] = set()
++    selected_objects: Counter[str] = Counter()
++    answer_counts: Counter[str] = Counter()
++
++    while len(selected) < limit:
++        available_answers = [a for a, values in by_answer.items() if values]
++        if not available_answers:
++            break
++        answer = min(available_answers, key=lambda a: (answer_counts[a], a))
++        values = by_answer[answer]
++        best_pos = 0
++        best_key = None
++        for pos, item in enumerate(values[:50]):
++            rid = row_id(item[1])
++            if rid in selected_ids:
++                continue
++            obj = str(extra(item[1]).get("object_id") or "")
++            key = (selected_objects[obj], sort_key(item))
++            if best_key is None or key < best_key:
++                best_key = key
++                best_pos = pos
++        item = values.pop(best_pos)
++        rid = row_id(item[1])
++        if rid in selected_ids:
++            continue
++        selected.append(item)
++        selected_ids.add(rid)
++        answer_counts[row_answer(item[1])] += 1
++        selected_objects[str(extra(item[1]).get("object_id") or "")] += 1
++    return selected
++
++
++def diverse_text_select(candidates: list[tuple[int, pd.Series, dict[str, Any]]], limit: int) -> list[tuple[int, pd.Series, dict[str, Any]]]:
++    by_answer: dict[str, list[tuple[int, pd.Series, dict[str, Any]]]] = {choice: [] for choice in sorted(CHOICES)}
++    for item in candidates:
++        answer = row_answer(item[1])
++        if answer in by_answer:
++            by_answer[answer].append(item)
++    for answer in by_answer:
++        by_answer[answer].sort(key=sort_key)
++
++    selected: list[tuple[int, pd.Series, dict[str, Any]]] = []
++    selected_ids: set[str] = set()
++    selected_objects: Counter[str] = Counter()
++    selected_texts: Counter[str] = Counter()
++    answer_counts: Counter[str] = Counter()
++
++    while len(selected) < limit:
++        available_answers = [a for a, values in by_answer.items() if values]
++        if not available_answers:
++            break
++        answer = min(available_answers, key=lambda a: (answer_counts[a], a))
++        values = by_answer[answer]
++        best_pos = 0
++        best_key = None
++        for pos, item in enumerate(values[:200]):
++            rid = row_id(item[1])
++            if rid in selected_ids:
++                continue
++            obj = str(extra(item[1]).get("object_id") or "")
++            text = correct_option_text(item[1]).strip().lower()
++            key = (
++                selected_texts[text],
++                selected_objects[obj],
++                sort_key(item),
++            )
++            if best_key is None or key < best_key:
++                best_key = key
++                best_pos = pos
++        item = values.pop(best_pos)
++        rid = row_id(item[1])
++        if rid in selected_ids:
++            continue
++        selected.append(item)
++        selected_ids.add(rid)
++        answer_counts[row_answer(item[1])] += 1
++        selected_objects[str(extra(item[1]).get("object_id") or "")] += 1
++        selected_texts[correct_option_text(item[1]).strip().lower()] += 1
++    return selected
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--source-data-dir", type=Path, required=True)
++    parser.add_argument("--prediction-jsonl", type=Path, required=True)
++    parser.add_argument("--output-dir", type=Path, required=True)
++    parser.add_argument("--question-type", required=True)
++    parser.add_argument("--limit", type=int, default=20)
++    parser.add_argument("--max-token-len", type=int, default=24)
++    parser.add_argument("--selection-name", default="step0_reliable20")
++    parser.add_argument("--strategy", choices=["balanced_shortest", "diverse_text"], default="balanced_shortest")
++    parser.add_argument(
++        "--test-mode",
++        choices=["full", "selected"],
++        default="full",
++        help="Use full question-type validation set, or only the selected reliable rows for candidate audits.",
++    )
++    args = parser.parse_args()
++
++    train_df = pd.read_parquet(args.source_data_dir / "train.parquet")
++    test_df = pd.read_parquet(args.source_data_dir / "test.parquet")
++    pred_map = load_prediction_map(args.prediction_jsonl, args.question_type)
++
++    train_q = train_df[train_df.apply(lambda row: row_qtype(row) == args.question_type, axis=1)].copy()
++    test_q = test_df[test_df.apply(lambda row: row_qtype(row) == args.question_type, axis=1)].copy()
++
++    candidates: list[tuple[int, pd.Series, dict[str, Any]]] = []
++    for idx, row in train_q.iterrows():
++        rid = row_id(row)
++        pred = pred_map.get(rid)
++        answer = row_answer(row)
++        if pred and is_reliable(pred, answer, args.max_token_len):
++            candidates.append((int(idx), row, pred))
++
++    if args.strategy == "diverse_text":
++        selected = diverse_text_select(candidates, args.limit)
++    else:
++        selected = balanced_select(candidates, args.limit)
++    selected_ids = [row_id(item[1]) for item in selected]
++    selected_set = set(selected_ids)
++    if len(selected) < args.limit:
++        raise RuntimeError(f"Only selected {len(selected)} reliable rows for {args.question_type}; need {args.limit}")
++
++    selected_df = train_q[train_q.apply(lambda row: row_id(row) in selected_set, axis=1)].copy()
++    selected_df["_selection_order"] = selected_df.apply(lambda row: selected_ids.index(row_id(row)), axis=1)
++    selected_df = selected_df.sort_values("_selection_order").drop(columns=["_selection_order"])
++    rest_df = train_q[~train_q.apply(lambda row: row_id(row) in selected_set, axis=1)].copy()
++    out_train = pd.concat([selected_df, rest_df], ignore_index=True)
++    if args.test_mode == "selected":
++        out_test = selected_df.reset_index(drop=True)
++    else:
++        out_test = test_q.reset_index(drop=True)
++
++    args.output_dir.mkdir(parents=True, exist_ok=True)
++    out_train.to_parquet(args.output_dir / "train.parquet", index=False)
++    out_test.to_parquet(args.output_dir / "test.parquet", index=False)
++
++    selected_records = []
++    for pos, (_idx, row, pred) in enumerate(selected):
++        info = extra(row)
++        selected_records.append(
++            {
++                "pos": pos,
++                "id": row_id(row),
++                "question_type": args.question_type,
++                "answer": row_answer(row),
++                "prediction": str(pred.get("prediction") or pred.get("pred") or ""),
++                "response_token_len": pred.get("response_token_len"),
++                "prediction_raw": pred.get("prediction_raw"),
++                "object_id": info.get("object_id"),
++                "answer_text": info.get("answer_text"),
++                "correct_option_text": correct_option_text(row),
++                "dataset_index": info.get("dataset_index"),
++            }
++        )
++
++    manifest = {
++        "selection_name": args.selection_name,
++        "question_type": args.question_type,
++        "source_data_dir": str(args.source_data_dir),
++        "prediction_jsonl": str(args.prediction_jsonl),
++        "output_dir": str(args.output_dir),
++        "train_rows": int(len(out_train)),
++        "test_rows": int(len(out_test)),
++        "candidate_rows": int(len(candidates)),
++        "selected_rows": int(len(selected)),
++        "selected_answer_counts": dict(Counter(record["answer"] for record in selected_records)),
++        "max_token_len": int(args.max_token_len),
++        "strategy": args.strategy,
++        "test_mode": args.test_mode,
++        "oracle_ground_truth_used_for_reliability": True,
++        "selected": selected_records,
++    }
++    (args.output_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
++
++    lines = [
++        f"# Reliable Step0 Adapt-{args.limit}: {args.question_type}",
++        "",
++        f"Selection rule: step0 correct, parsed A/B/C/D, non-hitmax, response_token_len within threshold; strategy={args.strategy}.",
++        "",
++        "| pos | id | answer | option text | tokens | object_id | raw |",
++        "| ---: | --- | --- | --- | ---: | --- | --- |",
++    ]
++    for rec in selected_records:
++        raw = str(rec.get("prediction_raw") or "").replace("|", "\\|")
++        text = str(rec.get("correct_option_text") or "").replace("|", "\\|")
++        lines.append(
++            f"| {rec['pos']} | {rec['id']} | {rec['answer']} | {text} | {rec.get('response_token_len')} | {rec.get('object_id')} | {raw} |"
++        )
++    (args.output_dir / f"{args.selection_name}_{args.question_type}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
++    print(json.dumps(manifest, ensure_ascii=False, indent=2))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/scripts/build_rollout_reliable_adapt_parquet.py b/scripts/build_rollout_reliable_adapt_parquet.py
+new file mode 100644
+index 0000000..e749bb2
+--- /dev/null
++++ b/scripts/build_rollout_reliable_adapt_parquet.py
+@@ -0,0 +1,296 @@
++#!/usr/bin/env python3
++"""Build an adaptation parquet from rollout-reliable MCQ audit predictions."""
++
++from __future__ import annotations
++
++import argparse
++import json
++import re
++from collections import Counter, defaultdict
++from pathlib import Path
++from typing import Any
++
++import pandas as pd
++
++
++CHOICES = {"A", "B", "C", "D"}
++OPTION_RE = re.compile(r"(?m)^([A-D])\.\s*(.+)$")
++
++
++def read_jsonl(path: Path) -> list[dict[str, Any]]:
++    rows = []
++    with path.open("r", encoding="utf-8") as handle:
++        for line in handle:
++            if line.strip():
++                rows.append(json.loads(line))
++    return rows
++
++
++def extra(row: pd.Series) -> dict[str, Any]:
++    value = row.get("extra_info")
++    return value if isinstance(value, dict) else {}
++
++
++def row_id(row: pd.Series) -> str:
++    info = extra(row)
++    return str(info.get("id") or info.get("index") or "")
++
++
++def row_qtype(row: pd.Series) -> str:
++    return str(extra(row).get("question_type") or "")
++
++
++def row_answer(row: pd.Series) -> str:
++    reward = row.get("reward_model")
++    if isinstance(reward, dict) and reward.get("ground_truth"):
++        return str(reward.get("ground_truth")).strip().upper()
++    return str(extra(row).get("answer") or "").strip().upper()
++
++
++def prompt_content(row: pd.Series) -> str:
++    value = row.get("prompt")
++    if isinstance(value, list) and value and isinstance(value[0], dict):
++        return str(value[0].get("content") or "")
++    try:
++        if len(value) and isinstance(value[0], dict):
++            return str(value[0].get("content") or "")
++    except Exception:
++        pass
++    return str(value)
++
++
++def correct_option_text(row: pd.Series) -> str:
++    answer = row_answer(row)
++    options = dict(OPTION_RE.findall(prompt_content(row)))
++    return str(options.get(answer) or "").strip()
++
++
++def group_audit_predictions(path: Path, qtype: str) -> dict[str, dict[str, Any]]:
++    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
++    for pred in read_jsonl(path):
++        if qtype and str(pred.get("question_type") or "") != qtype:
++            continue
++        key = str(pred.get("id") or pred.get("index") or "")
++        if key:
++            groups[key].append(pred)
++
++    out: dict[str, dict[str, Any]] = {}
++    for key, rows in groups.items():
++        first = rows[0]
++        corrects = [float(row.get("correct") or row.get("acc") or 0.0) for row in rows]
++        preds = [str(row.get("prediction") or row.get("pred") or "").strip() for row in rows]
++        pred_counts = Counter(preds)
++        majority_prediction, majority_count = pred_counts.most_common(1)[0]
++        invalid_rate = sum(1 for pred in preds if pred == "unknown") / len(rows)
++        hit_rate = sum(1 for row in rows if bool(row.get("hit_max_response_length"))) / len(rows)
++        answer = str(first.get("answer") or "").strip().upper()
++        out[key] = {
++            "id": key,
++            "answer": answer,
++            "votes": len(rows),
++            "response_accuracy": sum(corrects) / len(corrects),
++            "pass_at_votes": float(any(corrects)),
++            "majority_prediction": majority_prediction,
++            "majority_accuracy": float(majority_prediction == answer),
++            "majority_count": majority_count,
++            "majority_ratio": majority_count / len(rows),
++            "invalid_rate": invalid_rate,
++            "hit_max_response_length_rate": hit_rate,
++            "geo_soft_selected": float(first.get("geo_soft_selected") or 0.0),
++            "geo_soft_gt_mass": float(first.get("geo_soft_gt_mass") or 0.0),
++            "geo_soft_top_prob": float(first.get("geo_soft_top_prob") or 0.0),
++            "geo_harmony_hm": float(first.get("geo_harmony_hm") or 0.0),
++            "prediction_distribution": dict(pred_counts),
++        }
++    return out
++
++
++def audit_reliable(audit: dict[str, Any], args: argparse.Namespace) -> bool:
++    return (
++        audit["answer"] in CHOICES
++        and audit["majority_accuracy"] >= 1.0
++        and audit["pass_at_votes"] >= 1.0
++        and audit["response_accuracy"] >= args.min_response_accuracy
++        and audit["majority_ratio"] >= args.min_majority_ratio
++        and audit["geo_soft_selected"] >= args.min_geo_soft_selected
++        and audit["geo_soft_gt_mass"] >= args.min_geo_soft_gt_mass
++        and audit["invalid_rate"] <= args.max_invalid_rate
++        and audit["hit_max_response_length_rate"] <= args.max_hitmax_rate
++    )
++
++
++def quality_key(item: tuple[int, pd.Series, dict[str, Any]]) -> tuple[Any, ...]:
++    idx, row, audit = item
++    info = extra(row)
++    return (
++        -audit["response_accuracy"],
++        -audit["geo_soft_gt_mass"],
++        -audit["majority_ratio"],
++        -audit["geo_harmony_hm"],
++        audit["hit_max_response_length_rate"],
++        str(info.get("object_id") or ""),
++        int(info.get("dataset_index") or idx),
++    )
++
++
++def select_balanced_diverse(
++    candidates: list[tuple[int, pd.Series, dict[str, Any]]],
++    limit: int,
++) -> list[tuple[int, pd.Series, dict[str, Any]]]:
++    by_answer: dict[str, list[tuple[int, pd.Series, dict[str, Any]]]] = {choice: [] for choice in sorted(CHOICES)}
++    for item in candidates:
++        answer = row_answer(item[1])
++        if answer in by_answer:
++            by_answer[answer].append(item)
++    for answer in by_answer:
++        by_answer[answer].sort(key=quality_key)
++
++    selected: list[tuple[int, pd.Series, dict[str, Any]]] = []
++    selected_ids: set[str] = set()
++    selected_objects: Counter[str] = Counter()
++    selected_texts: Counter[str] = Counter()
++    answer_counts: Counter[str] = Counter()
++
++    while len(selected) < limit:
++        available_answers = [answer for answer, values in by_answer.items() if values]
++        if not available_answers:
++            break
++        answer = min(available_answers, key=lambda value: (answer_counts[value], value))
++        values = by_answer[answer]
++        best_pos = 0
++        best_key = None
++        for pos, item in enumerate(values[:200]):
++            rid = row_id(item[1])
++            if rid in selected_ids:
++                continue
++            obj = str(extra(item[1]).get("object_id") or "")
++            text = correct_option_text(item[1]).strip().lower()
++            key = (
++                selected_texts[text],
++                selected_objects[obj],
++                quality_key(item),
++            )
++            if best_key is None or key < best_key:
++                best_key = key
++                best_pos = pos
++        item = values.pop(best_pos)
++        rid = row_id(item[1])
++        if rid in selected_ids:
++            continue
++        selected.append(item)
++        selected_ids.add(rid)
++        answer_counts[row_answer(item[1])] += 1
++        selected_objects[str(extra(item[1]).get("object_id") or "")] += 1
++        selected_texts[correct_option_text(item[1]).strip().lower()] += 1
++    return selected
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--source-data-dir", type=Path, required=True)
++    parser.add_argument("--audit-jsonl", type=Path, required=True)
++    parser.add_argument("--output-dir", type=Path, required=True)
++    parser.add_argument("--question-type", required=True)
++    parser.add_argument("--limit", type=int, default=128)
++    parser.add_argument("--selection-name", default="rollout_reliable128")
++    parser.add_argument("--min-response-accuracy", type=float, default=0.5)
++    parser.add_argument("--min-majority-ratio", type=float, default=0.5)
++    parser.add_argument("--min-geo-soft-selected", type=float, default=1.0)
++    parser.add_argument("--min-geo-soft-gt-mass", type=float, default=0.5)
++    parser.add_argument("--max-invalid-rate", type=float, default=0.125)
++    parser.add_argument("--max-hitmax-rate", type=float, default=0.25)
++    args = parser.parse_args()
++
++    train_df = pd.read_parquet(args.source_data_dir / "train.parquet")
++    test_df = pd.read_parquet(args.source_data_dir / "test.parquet")
++    audit_map = group_audit_predictions(args.audit_jsonl, args.question_type)
++
++    train_q = train_df[train_df.apply(lambda row: row_qtype(row) == args.question_type, axis=1)].copy()
++    test_q = test_df[test_df.apply(lambda row: row_qtype(row) == args.question_type, axis=1)].copy()
++
++    candidates: list[tuple[int, pd.Series, dict[str, Any]]] = []
++    for idx, row in train_q.iterrows():
++        rid = row_id(row)
++        audit = audit_map.get(rid)
++        if audit and audit_reliable(audit, args):
++            candidates.append((int(idx), row, audit))
++
++    selected = select_balanced_diverse(candidates, args.limit)
++    if len(selected) < args.limit:
++        raise RuntimeError(f"Only selected {len(selected)} rollout-reliable rows; need {args.limit}")
++
++    selected_ids = [row_id(item[1]) for item in selected]
++    selected_set = set(selected_ids)
++    selected_df = train_q[train_q.apply(lambda row: row_id(row) in selected_set, axis=1)].copy()
++    selected_df["_selection_order"] = selected_df.apply(lambda row: selected_ids.index(row_id(row)), axis=1)
++    selected_df = selected_df.sort_values("_selection_order").drop(columns=["_selection_order"])
++    rest_df = train_q[~train_q.apply(lambda row: row_id(row) in selected_set, axis=1)].copy()
++    out_train = pd.concat([selected_df, rest_df], ignore_index=True)
++    out_test = test_q.reset_index(drop=True)
++
++    args.output_dir.mkdir(parents=True, exist_ok=True)
++    out_train.to_parquet(args.output_dir / "train.parquet", index=False)
++    out_test.to_parquet(args.output_dir / "test.parquet", index=False)
++
++    selected_records = []
++    for pos, (_idx, row, audit) in enumerate(selected):
++        info = extra(row)
++        selected_records.append(
++            {
++                "pos": pos,
++                "id": row_id(row),
++                "question_type": args.question_type,
++                "answer": row_answer(row),
++                "correct_option_text": correct_option_text(row),
++                "object_id": info.get("object_id"),
++                "dataset_index": info.get("dataset_index"),
++                **audit,
++            }
++        )
++
++    manifest = {
++        "selection_name": args.selection_name,
++        "question_type": args.question_type,
++        "source_data_dir": str(args.source_data_dir),
++        "audit_jsonl": str(args.audit_jsonl),
++        "output_dir": str(args.output_dir),
++        "train_rows": int(len(out_train)),
++        "test_rows": int(len(out_test)),
++        "candidate_rows": int(len(candidates)),
++        "selected_rows": int(len(selected)),
++        "selected_answer_counts": dict(Counter(record["answer"] for record in selected_records)),
++        "thresholds": {
++            "min_response_accuracy": args.min_response_accuracy,
++            "min_majority_ratio": args.min_majority_ratio,
++            "min_geo_soft_selected": args.min_geo_soft_selected,
++            "min_geo_soft_gt_mass": args.min_geo_soft_gt_mass,
++            "max_invalid_rate": args.max_invalid_rate,
++            "max_hitmax_rate": args.max_hitmax_rate,
++        },
++        "oracle_ground_truth_used_for_reliability": True,
++        "selected": selected_records,
++    }
++    (args.output_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
++
++    lines = [
++        f"# Rollout-Reliable Adapt-{args.limit}: {args.question_type}",
++        "",
++        "Selection rule: frozen 8-sample audit majority is correct, Geo soft selected, sufficient GT mass, low invalid/hitmax.",
++        "",
++        "| pos | id | answer | option text | resp_acc | maj_ratio | gt_mass | hm | object_id |",
++        "| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | --- |",
++    ]
++    for rec in selected_records:
++        text = str(rec.get("correct_option_text") or "").replace("|", "\\|")
++        lines.append(
++            f"| {rec['pos']} | {rec['id']} | {rec['answer']} | {text} | "
++            f"{rec['response_accuracy']:.3f} | {rec['majority_ratio']:.3f} | "
++            f"{rec['geo_soft_gt_mass']:.3f} | {rec['geo_harmony_hm']:.3f} | {rec.get('object_id')} |"
++        )
++    (args.output_dir / f"{args.selection_name}_{args.question_type}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
++    print(json.dumps(manifest, ensure_ascii=False, indent=2))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/scripts/eval_physx_mcq_pointllm.py b/scripts/eval_physx_mcq_pointllm.py
+new file mode 100644
+index 0000000..47fd62b
+--- /dev/null
++++ b/scripts/eval_physx_mcq_pointllm.py
+@@ -0,0 +1,898 @@
++#!/usr/bin/env python
++"""Evaluate local PointLLM on the PhysXNet-derived MCQ dataset.
++
++This script is intentionally evaluation-only: it reads local MCQ/OBJ/model
++files, derives lightweight point-cloud caches under outputs/, and writes
++predictions plus aggregate metrics.
++"""
++
++from __future__ import annotations
++
++import argparse
++import collections
++import datetime as dt
++import hashlib
++import json
++import logging
++import os
++import re
++import shlex
++import sys
++import time
++from pathlib import Path
++from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
++
++os.environ.setdefault("HF_HUB_OFFLINE", "1")
++os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
++os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
++
++import numpy as np
++import torch
++from tqdm import tqdm
++from transformers import AutoTokenizer, LogitsProcessor
++
++from pointllm.conversation import SeparatorStyle, conv_templates
++from pointllm.model import PointLLMLlamaForCausalLM
++from pointllm.utils import disable_torch_init
++
++
++REPO_ROOT = Path(__file__).resolve().parents[1]
++DEFAULT_DATASET = Path(
++    "/root/autodl-tmp/TTRV/physx_mcq_workspace/PhysX-3D/outputs/physxnet_mcq_verl.json"
++)
++DEFAULT_SIDECAR = Path(
++    "/root/autodl-tmp/TTRV/physx_mcq_workspace/PhysX-3D/outputs/physxnet_mcq.jsonl"
++)
++DEFAULT_PARTSEG_ROOT = Path(
++    "/root/autodl-tmp/TTRV/physx_mcq_workspace/PhysX-3D/"
++    "dataset_toolkits/physxnet/version_1/partseg"
++)
++MODEL_CANDIDATES = [
++    Path("/root/.cache/huggingface/hub/models--RunsenXu--PointLLM_7B_v1.2"),
++    Path("/root/autodl-tmp/.cache/huggingface/hub/models--RunsenXu--PointLLM_7B_v1.2"),
++    Path("/root/autodl-tmp/.cache/huggingface/transformers/models--RunsenXu--PointLLM_7B_v1.2"),
++]
++DEFAULT_MCQ_SYSTEM_PROMPT = (
++    "You are a multiple-choice question answering assistant. "
++    "Reply with the single option letter only: A, B, C, or D."
++)
++
++
++def setup_logging(log_path: Path) -> logging.Logger:
++    log_path.parent.mkdir(parents=True, exist_ok=True)
++    logger = logging.getLogger("physx_mcq_pointllm")
++    logger.setLevel(logging.INFO)
++    logger.handlers.clear()
++    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
++    stream = logging.StreamHandler(sys.stdout)
++    stream.setFormatter(formatter)
++    file_handler = logging.FileHandler(log_path)
++    file_handler.setFormatter(formatter)
++    logger.addHandler(stream)
++    logger.addHandler(file_handler)
++    return logger
++
++
++def resolve_model_path(path_arg: Optional[str]) -> Path:
++    candidates = [Path(path_arg).expanduser()] if path_arg else MODEL_CANDIDATES
++    for candidate in candidates:
++        if (candidate / "config.json").exists():
++            return candidate
++        snapshots = candidate / "snapshots"
++        if not snapshots.exists():
++            continue
++        refs_main = candidate / "refs" / "main"
++        snapshot_names: List[str] = []
++        if refs_main.exists():
++            snapshot_names.append(refs_main.read_text().strip())
++        snapshot_names.extend(sorted(p.name for p in snapshots.iterdir() if p.is_dir()))
++        seen = set()
++        for name in snapshot_names:
++            if not name or name in seen:
++                continue
++            seen.add(name)
++            snapshot = snapshots / name
++            if (snapshot / "config.json").exists() and (
++                (snapshot / "pytorch_model.bin.index.json").exists()
++                or any(snapshot.glob("pytorch_model-*.bin"))
++            ):
++                return snapshot
++    searched = ", ".join(str(p) for p in candidates)
++    raise FileNotFoundError(f"No complete local PointLLM snapshot found under: {searched}")
++
++
++def read_dataset(path: Path) -> List[Dict[str, Any]]:
++    with path.open("r", encoding="utf-8") as f:
++        data = json.load(f)
++    if not isinstance(data, list):
++        raise ValueError(f"Expected list dataset in {path}, got {type(data).__name__}")
++    return data
++
++
++def read_sidecar(path: Path) -> Dict[str, Dict[str, Any]]:
++    if not path.exists():
++        return {}
++    rows: Dict[str, Dict[str, Any]] = {}
++    with path.open("r", encoding="utf-8") as f:
++        for line in f:
++            if not line.strip():
++                continue
++            row = json.loads(line)
++            if row.get("id"):
++                rows[row["id"]] = row
++    return rows
++
++
++def object_id_from_example(example: Dict[str, Any], sidecar: Optional[Dict[str, Any]]) -> Optional[str]:
++    if sidecar and sidecar.get("object_id") is not None:
++        return str(sidecar["object_id"])
++    image_path = example.get("image_path") or ""
++    marker = "/partseg/"
++    if marker in image_path:
++        return image_path.split(marker, 1)[1].split("/", 1)[0]
++    return None
++
++
++def target_part_label_from_example(
++    example: Dict[str, Any], sidecar: Optional[Dict[str, Any]]
++) -> Optional[str]:
++    if sidecar:
++        source = sidecar.get("source") or {}
++        part_label = source.get("part_label")
++        if part_label is not None:
++            return str(part_label)
++    image_name = Path(example.get("image_path") or "").name
++    match = re.match(r"^(\d+)(?:_|\.|$)", image_name)
++    return match.group(1) if match else None
++
++
++def parse_obj(path: Path) -> Tuple[np.ndarray, np.ndarray]:
++    vertices: List[Tuple[float, float, float]] = []
++    faces: List[Tuple[int, int, int]] = []
++    with path.open("r", encoding="utf-8", errors="ignore") as f:
++        for line in f:
++            if line.startswith("v "):
++                parts = line.split()
++                if len(parts) >= 4:
++                    vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
++            elif line.startswith("f "):
++                raw_indices = []
++                for token in line.split()[1:]:
++                    idx_text = token.split("/", 1)[0]
++                    if not idx_text:
++                        continue
++                    idx = int(idx_text)
++                    if idx < 0:
++                        idx = len(vertices) + idx
++                    else:
++                        idx = idx - 1
++                    raw_indices.append(idx)
++                if len(raw_indices) >= 3:
++                    root = raw_indices[0]
++                    for i in range(1, len(raw_indices) - 1):
++                        faces.append((root, raw_indices[i], raw_indices[i + 1]))
++    return np.asarray(vertices, dtype=np.float32), np.asarray(faces, dtype=np.int64)
++
++
++def load_meshes(paths: Sequence[Path]) -> Tuple[np.ndarray, np.ndarray]:
++    all_vertices: List[np.ndarray] = []
++    all_faces: List[np.ndarray] = []
++    offset = 0
++    for path in paths:
++        vertices, faces = parse_obj(path)
++        if vertices.size == 0:
++            continue
++        all_vertices.append(vertices)
++        if faces.size:
++            all_faces.append(faces + offset)
++        offset += len(vertices)
++    if not all_vertices:
++        raise ValueError("no vertices found in OBJ files")
++    vertices = np.concatenate(all_vertices, axis=0)
++    faces = np.concatenate(all_faces, axis=0) if all_faces else np.empty((0, 3), dtype=np.int64)
++    return vertices, faces
++
++
++def stable_seed(seed: int, key: str) -> int:
++    digest = hashlib.sha256(f"{seed}:{key}".encode("utf-8")).digest()
++    return int.from_bytes(digest[:8], "little") % (2**32)
++
++
++def sample_points(vertices: np.ndarray, faces: np.ndarray, pointnum: int, rng: np.random.Generator) -> np.ndarray:
++    if len(vertices) == 0:
++        raise ValueError("cannot sample from empty vertex array")
++    if len(faces) == 0:
++        replace = len(vertices) < pointnum
++        idx = rng.choice(len(vertices), size=pointnum, replace=replace)
++        return vertices[idx].astype(np.float32)
++
++    tris = vertices[faces]
++    cross = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
++    areas = np.linalg.norm(cross, axis=1) * 0.5
++    valid = areas > 1e-12
++    if not np.any(valid):
++        replace = len(vertices) < pointnum
++        idx = rng.choice(len(vertices), size=pointnum, replace=replace)
++        return vertices[idx].astype(np.float32)
++
++    tris = tris[valid]
++    areas = areas[valid]
++    probs = areas / areas.sum()
++    tri_idx = rng.choice(len(tris), size=pointnum, replace=True, p=probs)
++    chosen = tris[tri_idx]
++    u = rng.random(pointnum, dtype=np.float32)
++    v = rng.random(pointnum, dtype=np.float32)
++    flip = u + v > 1.0
++    u[flip] = 1.0 - u[flip]
++    v[flip] = 1.0 - v[flip]
++    points = chosen[:, 0] + u[:, None] * (chosen[:, 1] - chosen[:, 0]) + v[:, None] * (
++        chosen[:, 2] - chosen[:, 0]
++    )
++    return points.astype(np.float32)
++
++
++def normalize_xyz(points: np.ndarray) -> np.ndarray:
++    centroid = points.mean(axis=0, keepdims=True)
++    points = points - centroid
++    radius = np.sqrt((points**2).sum(axis=1)).max()
++    if radius > 0:
++        points = points / radius
++    return points.astype(np.float32)
++
++
++def obj_paths_for_example(
++    partseg_root: Path,
++    object_id: str,
++    point_scope: str,
++    target_part_label: Optional[str],
++) -> List[Path]:
++    obj_dir = partseg_root / object_id / "objs"
++    if point_scope == "target_part":
++        if target_part_label is None:
++            raise FileNotFoundError("target part label unavailable")
++        path = obj_dir / f"{target_part_label}.obj"
++        if not path.exists():
++            raise FileNotFoundError(f"target part OBJ missing: {path}")
++        return [path]
++    paths = sorted(obj_dir.glob("*.obj"), key=lambda p: (len(p.stem), p.stem))
++    if not paths:
++        raise FileNotFoundError(f"no OBJ files found under {obj_dir}")
++    return paths
++
++
++def get_or_create_point_cloud(
++    example: Dict[str, Any],
++    sidecar: Optional[Dict[str, Any]],
++    partseg_root: Path,
++    cache_dir: Path,
++    point_scope: str,
++    pointnum: int,
++    seed: int,
++) -> Tuple[Path, np.ndarray, str]:
++    object_id = object_id_from_example(example, sidecar)
++    if object_id is None:
++        raise ValueError("object_id unavailable")
++    part_label = target_part_label_from_example(example, sidecar)
++    cache_key = f"{object_id}_{point_scope}"
++    if point_scope == "target_part":
++        cache_key += f"_{part_label or 'unknown'}"
++    cache_name = f"{cache_key}_{pointnum}_seed{seed}.npy"
++    cache_path = cache_dir / cache_name
++    if cache_path.exists():
++        return cache_path, np.load(cache_path), object_id
++
++    paths = obj_paths_for_example(partseg_root, object_id, point_scope, part_label)
++    vertices, faces = load_meshes(paths)
++    rng = np.random.default_rng(stable_seed(seed, cache_key))
++    xyz = normalize_xyz(sample_points(vertices, faces, pointnum, rng))
++    rgb = np.zeros_like(xyz, dtype=np.float32)
++    point_cloud = np.concatenate([xyz, rgb], axis=1).astype(np.float32)
++    cache_dir.mkdir(parents=True, exist_ok=True)
++    np.save(cache_path, point_cloud)
++    return cache_path, point_cloud, object_id
++
++
++def adapt_mcq_prompt(raw_prompt: str, prompt_suffix: str = "") -> str:
++    """Keep the dataset prompt; optionally add a short answer cue for ablations."""
++    prompt = raw_prompt.strip()
++    suffix = prompt_suffix.strip()
++    if suffix and not prompt.rstrip().endswith(suffix):
++        prompt = f"{prompt}\n{suffix}"
++    return prompt
++
++
++def build_point_prompt(raw_prompt: str, point_backbone_config: Dict[str, Any], prompt_suffix: str = "") -> str:
++    point_token_len = point_backbone_config["point_token_len"]
++    patch = point_backbone_config["default_point_patch_token"] * point_token_len
++    if point_backbone_config["mm_use_point_start_end"]:
++        point_tokens = (
++            point_backbone_config["default_point_start_token"]
++            + patch
++            + point_backbone_config["default_point_end_token"]
++        )
++    else:
++        point_tokens = patch
++    raw_prompt = adapt_mcq_prompt(raw_prompt, prompt_suffix=prompt_suffix)
++    if "<image>" in raw_prompt:
++        return raw_prompt.replace("<image>", point_tokens, 1)
++    return point_tokens + "\n" + raw_prompt
++
++
++def build_input_ids(
++    raw_prompt: str,
++    model: PointLLMLlamaForCausalLM,
++    tokenizer: AutoTokenizer,
++    conv_mode: str,
++    prompt_suffix: str,
++    system_prompt: str,
++) -> torch.Tensor:
++    conv = conv_templates[conv_mode].copy()
++    if system_prompt:
++        conv.system = system_prompt
++    qs = build_point_prompt(raw_prompt, model.get_model().point_backbone_config, prompt_suffix=prompt_suffix)
++    conv.append_message(conv.roles[0], qs)
++    conv.append_message(conv.roles[1], None)
++    prompt = conv.get_prompt()
++    inputs = tokenizer([prompt])
++    return torch.as_tensor(inputs.input_ids, device="cuda")
++
++
++def clean_generation(output: str, conv_mode: str) -> str:
++    conv = conv_templates[conv_mode].copy()
++    stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
++    output = output.strip()
++    if stop_str and stop_str in output:
++        output = output.split(stop_str, 1)[0].strip()
++    return output
++
++
++OPTION_TEXT_SKIP = {"a", "an", "the", "and", "or", "of", "with", "other", "object", "part"}
++
++
++def _normalize_option_text(text: str) -> str:
++    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
++
++
++def _option_tokens(text: str) -> List[str]:
++    return [token for token in _normalize_option_text(text).split() if token not in OPTION_TEXT_SKIP]
++
++
++def _option_phrase_variants(text: str) -> List[str]:
++    variants = [_normalize_option_text(text)]
++    without_parenthetical = re.sub(r"\([^)]*\)", " ", str(text))
++    variants.append(_normalize_option_text(without_parenthetical))
++    seen = set()
++    out = []
++    for variant in variants:
++        if len(variant) < 3 or variant in OPTION_TEXT_SKIP or variant in seen:
++            continue
++        seen.add(variant)
++        out.append(variant)
++    return out
++
++
++def _extract_prompt_options(prompt: Optional[str]) -> Dict[str, str]:
++    if not prompt:
++        return {}
++    matches = re.findall(
++        r"(?:^|\n)\s*([ABCD])\.\s*(.*?)(?=(?:\n\s*[ABCD]\.)|\s+ASSISTANT:|$)",
++        prompt,
++        flags=re.S,
++    )
++    return {choice.upper(): text.strip() for choice, text in matches}
++
++
++def _match_option_text(raw: str, prompt: Optional[str]) -> Optional[str]:
++    options = _extract_prompt_options(prompt)
++    if not options:
++        return None
++    raw_norm = _normalize_option_text(raw)
++    matches: List[Tuple[int, str]] = []
++    for choice, option_text in options.items():
++        for option_norm in _option_phrase_variants(option_text):
++            if option_norm in raw_norm:
++                matches.append((len(option_norm), choice))
++    if not matches:
++        raw_tokens = set(_option_tokens(raw))
++        token_matches: List[Tuple[int, float, int, str]] = []
++        for choice, option_text in options.items():
++            option_tokens = _option_tokens(option_text)
++            if not option_tokens:
++                continue
++            option_set = set(option_tokens)
++            overlap = sum(1 for token in option_set if token in raw_tokens)
++            if not overlap:
++                continue
++            ratio = overlap / len(option_set)
++            if overlap == len(option_set) or overlap >= 2:
++                token_matches.append((overlap, ratio, len(option_set), choice))
++        if not token_matches:
++            return None
++        best = max(token_matches, key=lambda item: (item[0], item[1], item[2]))
++        best_choices = [
++            choice
++            for overlap, ratio, token_count, choice in token_matches
++            if (overlap, ratio, token_count) == best[:3]
++        ]
++        return best_choices[0] if len(best_choices) == 1 else None
++    max_len = max(length for length, _choice in matches)
++    choices = {choice for length, choice in matches if length == max_len}
++    return next(iter(choices)) if len(choices) == 1 else None
++
++
++def parse_prediction(raw: str, prompt: Optional[str] = None) -> str:
++    text = raw.strip().replace("</s>", " ").replace("<|im_end|>", " ")
++    first = re.match(r"^\s*[\(\[]?\s*([ABCD])\s*[\)\]]?\s*$", text, flags=re.I)
++    if first:
++        return first.group(1).upper()
++    first = re.match(r"^\s*[\(\[]?\s*([ABCD])\s*[\)\].,:;-]", text, flags=re.I)
++    if first:
++        return first.group(1).upper()
++    guided = re.search(
++        r"(?:answer|option|choice|letter|choose|select|pick)\s*(?:is|:|-)?\s*[\(\[]?\s*['\"]?([ABCD])\b",
++        text,
++        flags=re.I,
++    )
++    if guided:
++        return guided.group(1).upper()
++    standalone = re.findall(r"\b([ABCD])\b", text)
++    if standalone:
++        # Only accept uppercase standalone letters here. A case-insensitive
++        # fallback incorrectly maps the English article "a" to option A.
++        return standalone[-1].upper()
++    option_match = _match_option_text(text, prompt)
++    if option_match:
++        return option_match
++    return "unknown"
++
++
++def get_choice_token_ids(tokenizer: AutoTokenizer) -> Dict[str, int]:
++    token_ids: Dict[str, int] = {}
++    for choice in ("A", "B", "C", "D"):
++        ids = tokenizer.encode(choice, add_special_tokens=False)
++        if len(ids) != 1:
++            raise ValueError(f"Choice {choice!r} is not a single tokenizer token: {ids}")
++        token_ids[choice] = ids[0]
++    return token_ids
++
++
++class ChoiceOnlyLogitsProcessor(LogitsProcessor):
++    def __init__(self, allowed_token_ids: Sequence[int]):
++        self.allowed_token_ids = list(allowed_token_ids)
++
++    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
++        masked = torch.full_like(scores, -float("inf"))
++        allowed = torch.tensor(self.allowed_token_ids, device=scores.device, dtype=torch.long)
++        masked.index_copy_(dim=-1, index=allowed, source=scores.index_select(dim=-1, index=allowed))
++        return masked
++
++
++def init_model(model_path: Path, torch_dtype: torch.dtype) -> Tuple[PointLLMLlamaForCausalLM, AutoTokenizer]:
++    disable_torch_init()
++    tokenizer = AutoTokenizer.from_pretrained(str(model_path), local_files_only=True)
++    model = PointLLMLlamaForCausalLM.from_pretrained(
++        str(model_path),
++        low_cpu_mem_usage=False,
++        use_cache=True,
++        torch_dtype=torch_dtype,
++        local_files_only=True,
++    ).cuda()
++    model.initialize_tokenizer_point_backbone_config_wo_embedding(tokenizer)
++    model.eval()
++    return model, tokenizer
++
++
++def predict_choice_from_logits(
++    model: PointLLMLlamaForCausalLM,
++    tokenizer: AutoTokenizer,
++    input_ids: torch.Tensor,
++    point_cloud: np.ndarray,
++) -> Tuple[str, Dict[str, float]]:
++    """Choose directly among A/B/C/D for the next token.
++
++    Optional stricter mode: use the model's next-token distribution and select
++    among the four answer letters.
++    """
++    choice_token_ids = get_choice_token_ids(tokenizer)
++    point_tensor = torch.from_numpy(point_cloud).unsqueeze(0).to(device="cuda", dtype=model.dtype)
++    with torch.inference_mode():
++        outputs = model(
++            input_ids=input_ids,
++            point_clouds=point_tensor,
++            use_cache=False,
++            return_dict=True,
++        )
++        logits = outputs.logits[0, -1]
++        ids = torch.tensor([choice_token_ids[c] for c in ("A", "B", "C", "D")], device=logits.device)
++        choice_logits = logits.index_select(0, ids).float()
++        probs = torch.softmax(choice_logits, dim=0)
++        best_idx = int(torch.argmax(choice_logits).item())
++    choices = ("A", "B", "C", "D")
++    scores = {
++        choice: float(probs[i].detach().cpu().item())
++        for i, choice in enumerate(choices)
++    }
++    return choices[best_idx], scores
++
++
++def generate_one_constrained_choice(
++    model: PointLLMLlamaForCausalLM,
++    tokenizer: AutoTokenizer,
++    input_ids: torch.Tensor,
++    point_cloud: np.ndarray,
++) -> str:
++    choice_token_ids = get_choice_token_ids(tokenizer)
++    allowed_ids = [choice_token_ids[c] for c in ("A", "B", "C", "D")]
++    point_tensor = torch.from_numpy(point_cloud).unsqueeze(0).to(device="cuda", dtype=model.dtype)
++    with torch.inference_mode():
++        output_ids = model.generate(
++            input_ids,
++            point_clouds=point_tensor,
++            do_sample=False,
++            max_new_tokens=1,
++            logits_processor=[ChoiceOnlyLogitsProcessor(allowed_ids)],
++            use_cache=True,
++            pad_token_id=tokenizer.pad_token_id,
++            eos_token_id=tokenizer.eos_token_id,
++        )
++    input_token_len = input_ids.shape[1]
++    output = tokenizer.batch_decode(output_ids[:, input_token_len:], skip_special_tokens=True)[0]
++    return output.strip()
++
++
++def generate_one(
++    model: PointLLMLlamaForCausalLM,
++    tokenizer: AutoTokenizer,
++    input_ids: torch.Tensor,
++    point_cloud: np.ndarray,
++    max_new_tokens: int,
++    conv_mode: str,
++) -> str:
++    point_tensor = torch.from_numpy(point_cloud).unsqueeze(0).to(device="cuda", dtype=model.dtype)
++    with torch.inference_mode():
++        output_ids = model.generate(
++            input_ids,
++            point_clouds=point_tensor,
++            do_sample=False,
++            max_new_tokens=max_new_tokens,
++            use_cache=True,
++            pad_token_id=tokenizer.pad_token_id,
++            eos_token_id=tokenizer.eos_token_id,
++        )
++    input_token_len = input_ids.shape[1]
++    output = tokenizer.batch_decode(output_ids[:, input_token_len:], skip_special_tokens=True)[0]
++    return clean_generation(output, conv_mode)
++
++
++def pct(num: int, den: int) -> float:
++    return float(num) / float(den) if den else 0.0
++
++
++def update_type_stats(stats: Dict[str, Dict[str, int]], question_type: str, correct: bool, invalid: bool) -> None:
++    row = stats.setdefault(question_type, {"num_evaluated": 0, "num_correct": 0, "invalid_outputs": 0})
++    row["num_evaluated"] += 1
++    row["num_correct"] += int(correct)
++    row["invalid_outputs"] += int(invalid)
++
++
++def write_json(path: Path, payload: Dict[str, Any]) -> None:
++    with path.open("w", encoding="utf-8") as f:
++        json.dump(payload, f, ensure_ascii=False, indent=2)
++
++
++def render_report(metrics: Dict[str, Any]) -> str:
++    lines = [
++        "# PhysX MCQ PointLLM 7B Preliminary Evaluation",
++        "",
++        f"- Model path: `{metrics['model_path']}`",
++        f"- Dataset path: `{metrics['dataset_path']}`",
++        f"- Sidecar path: `{metrics.get('sidecar_path')}`",
++        f"- Command used: `{metrics['command']}`",
++        f"- Point preprocessing: {metrics['point_preprocessing']}",
++        f"- Total dataset examples: {metrics['num_total']}",
++        f"- Evaluated examples: {metrics['num_evaluated']}",
++        f"- Correct: {metrics['num_correct']}",
++        f"- Accuracy: {metrics['accuracy']:.6f}",
++        f"- Invalid outputs: {metrics['invalid_outputs']}",
++        f"- Skipped: `{json.dumps(metrics['skipped'], ensure_ascii=False)}`",
++        f"- Runtime seconds: {metrics['runtime_seconds']:.2f}",
++        "",
++        "## Accuracy By Question Type",
++        "",
++        "| question_type | evaluated | correct | accuracy | invalid_outputs |",
++        "| --- | ---: | ---: | ---: | ---: |",
++    ]
++    for question_type, row in sorted(metrics["accuracy_by_question_type"].items()):
++        lines.append(
++            f"| {question_type} | {row['num_evaluated']} | {row['num_correct']} | "
++            f"{row['accuracy']:.6f} | {row['invalid_outputs']} |"
++        )
++    lines.extend(
++        [
++            "",
++            "## Runtime Notes And Known Limitations",
++            "",
++        ]
++    )
++    for note in metrics["runtime_notes_and_known_limitations"]:
++        lines.append(f"- {note}")
++    lines.append("")
++    return "\n".join(lines)
++
++
++def ensure_can_write(paths: Iterable[Path], overwrite: bool) -> None:
++    existing = [str(path) for path in paths if path.exists()]
++    if existing and not overwrite:
++        joined = "\n".join(existing)
++        raise FileExistsError(f"Output files already exist. Use --overwrite to replace:\n{joined}")
++
++
++def dtype_from_name(name: str) -> torch.dtype:
++    return {"float32": torch.float32, "float16": torch.float16, "bfloat16": torch.bfloat16}[name]
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--dataset_path", type=Path, default=DEFAULT_DATASET)
++    parser.add_argument("--sidecar_path", type=Path, default=DEFAULT_SIDECAR)
++    parser.add_argument("--partseg_root", type=Path, default=DEFAULT_PARTSEG_ROOT)
++    parser.add_argument("--model_path", type=str, default=None)
++    parser.add_argument("--max_examples", type=int, default=200)
++    parser.add_argument("--start_index", type=int, default=0)
++    parser.add_argument("--pointnum", type=int, default=8192)
++    parser.add_argument("--seed", type=int, default=0)
++    parser.add_argument("--point_scope", choices=["full_object", "target_part"], default="full_object")
++    parser.add_argument(
++        "--answer_mode",
++        choices=["constrained_generate", "choice_logits", "freeform"],
++        default="freeform",
++        help=(
++            "constrained_generate masks generation to A/B/C/D for one token; "
++            "choice_logits selects among A/B/C/D next-token logits; "
++            "freeform runs open-ended generation then parses it like VERL/TTRL."
++        ),
++    )
++    parser.add_argument(
++        "--prompt_suffix",
++        type=str,
++        default="",
++        help=(
++            "Optional suffix appended to the user MCQ prompt before the assistant turn. "
++            "Default is empty to match the VERL-style prompt that ends after option D."
++        ),
++    )
++    parser.add_argument(
++        "--system_prompt",
++        type=str,
++        default=DEFAULT_MCQ_SYSTEM_PROMPT,
++        help="Conversation system prompt adapter. Use '' to keep the original PointLLM/Vicuna system prompt.",
++    )
++    parser.add_argument("--max_new_tokens", type=int, default=8)
++    parser.add_argument("--torch_dtype", choices=["float32", "float16", "bfloat16"], default="bfloat16")
++    parser.add_argument("--conv_mode", default="vicuna_v1_1")
++    parser.add_argument("--output_prefix", type=Path, default=REPO_ROOT / "outputs" / "physx_mcq_pointllm7b")
++    parser.add_argument("--log_path", type=Path, default=REPO_ROOT / "logs" / "physx_mcq_pointllm7b_eval.log")
++    parser.add_argument("--cache_dir", type=Path, default=REPO_ROOT / "outputs" / "physxnet_point_cache")
++    parser.add_argument("--overwrite", action="store_true")
++    return parser.parse_args()
++
++
++def main() -> int:
++    args = parse_args()
++    predictions_path = args.output_prefix.with_name(args.output_prefix.name + "_predictions.jsonl")
++    metrics_path = args.output_prefix.with_name(args.output_prefix.name + "_metrics.json")
++    report_path = args.output_prefix.with_name(args.output_prefix.name + "_report.md")
++    ensure_can_write([predictions_path, metrics_path, report_path, args.log_path], args.overwrite)
++
++    logger = setup_logging(args.log_path)
++    start_time = time.time()
++    command = " ".join(shlex.quote(x) for x in [sys.executable, *sys.argv])
++    model_path = resolve_model_path(args.model_path)
++    logger.info("Command: %s", command)
++    logger.info("Using model path: %s", model_path)
++    logger.info("Using dataset path: %s", args.dataset_path)
++    logger.info("Using sidecar path: %s", args.sidecar_path)
++    logger.info("Using point cache: %s", args.cache_dir)
++    logger.info("Point scope: %s", args.point_scope)
++
++    data = read_dataset(args.dataset_path)
++    sidecar = read_sidecar(args.sidecar_path)
++    num_total = len(data)
++    stop_index = num_total if args.max_examples < 0 else min(num_total, args.start_index + args.max_examples)
++    selected = data[args.start_index : stop_index]
++    logger.info("Dataset total=%d, selected=%d, start_index=%d", num_total, len(selected), args.start_index)
++
++    model, tokenizer = init_model(model_path, dtype_from_name(args.torch_dtype))
++    point_config = model.get_model().point_backbone_config
++    logger.info("Point backbone config: %s", point_config)
++
++    predictions_path.parent.mkdir(parents=True, exist_ok=True)
++    skipped: collections.Counter[str] = collections.Counter()
++    type_stats: Dict[str, Dict[str, int]] = {}
++    invalid_outputs = 0
++    num_evaluated = 0
++    num_correct = 0
++    written_predictions = 0
++
++    with predictions_path.open("w", encoding="utf-8") as pred_f:
++        for dataset_index, example in enumerate(tqdm(selected, desc="evaluating"), start=args.start_index):
++            ex_id = example.get("id") or f"index_{dataset_index}"
++            meta = sidecar.get(ex_id)
++            question_type = (meta or {}).get("question_type", "unknown")
++            answer = str(example.get("answer", "")).strip().upper()
++            if answer not in {"A", "B", "C", "D"}:
++                skipped["invalid_answer"] += 1
++                continue
++            try:
++                point_path, point_cloud, object_id = get_or_create_point_cloud(
++                    example=example,
++                    sidecar=meta,
++                    partseg_root=args.partseg_root,
++                    cache_dir=args.cache_dir,
++                    point_scope=args.point_scope,
++                    pointnum=args.pointnum,
++                    seed=args.seed,
++                )
++            except Exception as exc:
++                skipped[f"point_cloud_error:{type(exc).__name__}"] += 1
++                logger.warning("Skipping %s due to point-cloud error: %s", ex_id, exc)
++                continue
++            try:
++                input_ids = build_input_ids(
++                    example["prompt"],
++                    model,
++                    tokenizer,
++                    args.conv_mode,
++                    prompt_suffix=args.prompt_suffix,
++                    system_prompt=args.system_prompt,
++                )
++                choice_scores = None
++                if args.answer_mode == "constrained_generate":
++                    raw = generate_one_constrained_choice(
++                        model=model,
++                        tokenizer=tokenizer,
++                        input_ids=input_ids,
++                        point_cloud=point_cloud,
++                    )
++                elif args.answer_mode == "choice_logits":
++                    raw, choice_scores = predict_choice_from_logits(
++                        model=model,
++                        tokenizer=tokenizer,
++                        input_ids=input_ids,
++                        point_cloud=point_cloud,
++                    )
++                else:
++                    raw = generate_one(
++                        model=model,
++                        tokenizer=tokenizer,
++                        input_ids=input_ids,
++                        point_cloud=point_cloud,
++                        max_new_tokens=args.max_new_tokens,
++                        conv_mode=args.conv_mode,
++                    )
++            except Exception as exc:
++                skipped[f"inference_error:{type(exc).__name__}"] += 1
++                logger.exception("Skipping %s due to inference error", ex_id)
++                continue
++
++            prediction = parse_prediction(raw, example.get("prompt"))
++            invalid = prediction == "unknown"
++            if invalid:
++                invalid_outputs += 1
++            correct = prediction == answer
++            response_token_len = len(tokenizer.encode(raw, add_special_tokens=False))
++            max_response_len = 1 if args.answer_mode == "constrained_generate" else args.max_new_tokens
++            num_evaluated += 1
++            num_correct += int(correct)
++            update_type_stats(type_stats, question_type, correct, invalid)
++            record = {
++                "id": ex_id,
++                "dataset_index": dataset_index,
++                "object_id": object_id,
++                "question_type": question_type,
++                "answer": answer,
++                "prediction_raw": raw,
++                "prediction": prediction,
++                "correct": correct,
++                "response_token_len": response_token_len,
++                "hit_max_response_length": bool(response_token_len >= max_response_len),
++                "answer_mode": args.answer_mode,
++                "prompt_suffix": args.prompt_suffix,
++                "system_prompt": args.system_prompt,
++                "choice_scores": choice_scores,
++                "prompt": example.get("prompt"),
++                "point_path": str(point_path),
++                "point_scope": args.point_scope,
++                "model_path": str(model_path),
++                "image_path": example.get("image_path"),
++            }
++            pred_f.write(json.dumps(record, ensure_ascii=False) + "\n")
++            pred_f.flush()
++            written_predictions += 1
++            logger.info(
++                "id=%s qtype=%s answer=%s prediction=%s correct=%s raw=%r",
++                ex_id,
++                question_type,
++                answer,
++                prediction,
++                correct,
++                raw,
++            )
++
++    accuracy_by_type: Dict[str, Dict[str, Any]] = {}
++    for question_type, row in type_stats.items():
++        accuracy_by_type[question_type] = {
++            **row,
++            "accuracy": pct(row["num_correct"], row["num_evaluated"]),
++        }
++
++    runtime = time.time() - start_time
++    metrics = {
++        "model_path": str(model_path),
++        "dataset_path": str(args.dataset_path),
++        "sidecar_path": str(args.sidecar_path),
++        "partseg_root": str(args.partseg_root),
++        "command": command,
++        "num_total": num_total,
++        "num_selected": len(selected),
++        "start_index": args.start_index,
++        "max_examples": args.max_examples,
++        "num_evaluated": num_evaluated,
++        "num_predictions_written": written_predictions,
++        "num_correct": num_correct,
++        "accuracy": pct(num_correct, num_evaluated),
++        "accuracy_by_question_type": accuracy_by_type,
++        "skipped": dict(skipped),
++        "invalid_outputs": invalid_outputs,
++        "point_preprocessing": (
++            f"Derived from local PhysXNet OBJ files with scope={args.point_scope}; "
++            f"sampled {args.pointnum} surface points per object using seed={args.seed}; "
++            "coordinates normalized to unit sphere; RGB channels set to zero; "
++            f"cache stored under {args.cache_dir}."
++        ),
++        "pointnum": args.pointnum,
++        "seed": args.seed,
++        "torch_dtype": args.torch_dtype,
++        "answer_mode": args.answer_mode,
++        "prompt_suffix": args.prompt_suffix,
++        "system_prompt": args.system_prompt,
++        "max_new_tokens": args.max_new_tokens,
++        "runtime_seconds": runtime,
++        "predictions_path": str(predictions_path),
++        "metrics_path": str(metrics_path),
++        "report_path": str(report_path),
++        "log_path": str(args.log_path),
++        "created_utc": dt.datetime.utcnow().isoformat(timespec="seconds") + "Z",
++        "runtime_notes_and_known_limitations": [
++            "This is a preliminary local evaluation, not a fixed public benchmark result.",
++            "The PNG image_path field was not used as model input; PointLLM received derived point clouds.",
++            "The default point cloud represents the full object by concatenating all local part OBJ files.",
++            "OBJ geometry has no reliable color, so zero RGB channels were appended because this checkpoint expects 6D points.",
++            "Question types are recovered from the local JSONL sidecar when available.",
++            "Default answer_mode=freeform follows the VERL/TTRL pattern: use the MCQ prompt, generate normally, then parse an A/B/C/D option letter.",
++            "Default prompt_suffix is empty to match the VERL-style prompt, which ends after option D before the assistant response.",
++            "prediction_raw preserves the model's unnormalized free-form response; prediction is the parsed A/B/C/D answer used for scoring.",
++            "Unparsable model outputs are counted as incorrect and included in invalid_outputs.",
++            "constrained_generate and choice_logits remain available as stricter ablations, but are not the default.",
++            "No training, fine-tuning, downloads, external APIs, or original dataset modifications are performed by this script.",
++        ],
++    }
++    write_json(metrics_path, metrics)
++    report_path.write_text(render_report(metrics), encoding="utf-8")
++    logger.info("Wrote predictions: %s", predictions_path)
++    logger.info("Wrote metrics: %s", metrics_path)
++    logger.info("Wrote report: %s", report_path)
++    logger.info(
++        "Finished: evaluated=%d correct=%d accuracy=%.6f invalid=%d skipped=%s runtime=%.2fs",
++        num_evaluated,
++        num_correct,
++        metrics["accuracy"],
++        invalid_outputs,
++        dict(skipped),
++        runtime,
++    )
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/scripts/prepare_physx_mcq_verl.py b/scripts/prepare_physx_mcq_verl.py
+new file mode 100755
+index 0000000..0b54a49
+--- /dev/null
++++ b/scripts/prepare_physx_mcq_verl.py
+@@ -0,0 +1,281 @@
++#!/usr/bin/env python3
++"""Prepare PhysXNet MCQ data for PointLLM veRL/TTRV runs.
++
++This script only reads local PhysX JSON/OBJ files, writes parquet files under an
++experiment output directory, and reuses the PointLLM OBJ-to-point-cache logic.
++"""
++
++from __future__ import annotations
++
++import argparse
++import json
++import os
++import sys
++from pathlib import Path
++from typing import Any
++
++os.environ.setdefault("HF_HUB_OFFLINE", "1")
++os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
++os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
++
++import numpy as np
++from datasets import Dataset
++
++SCRIPT_DIR = Path(__file__).resolve().parent
++POINTLLM_ROOT = SCRIPT_DIR.parents[0]
++if str(POINTLLM_ROOT) not in sys.path:
++    sys.path.insert(0, str(POINTLLM_ROOT))
++if str(SCRIPT_DIR) not in sys.path:
++    sys.path.insert(0, str(SCRIPT_DIR))
++
++from eval_physx_mcq_pointllm import (  # noqa: E402
++    DEFAULT_DATASET,
++    DEFAULT_PARTSEG_ROOT,
++    DEFAULT_SIDECAR,
++    get_or_create_point_cloud,
++    read_dataset,
++    read_sidecar,
++    target_part_label_from_example,
++)
++
++POINT_TOKEN_LEN = 513
++DEFAULT_POINT_PROMPT_NOTES = (
++    "PhysXNet OBJ -> sampled surface points -> unit-sphere XYZ normalization -> zero RGB channels. "
++    "PNG image_path is retained only as metadata and is not used as point input."
++)
++
++
++def point_tokens(point_token_len: int) -> str:
++    return "<point_start>" + ("<point_patch>" * point_token_len) + "<point_end>"
++
++
++def build_prompt(raw_prompt: str, point_token_len: int, prompt_suffix: str = "") -> str:
++    prompt = str(raw_prompt).strip()
++    prompt = prompt.replace("<image>", point_tokens(point_token_len), 1)
++    suffix = prompt_suffix.strip()
++    if suffix and not prompt.endswith(suffix):
++        prompt = f"{prompt}\n{suffix}"
++    return prompt
++
++
++def split_csv_set(value: str) -> set[str]:
++    return {part.strip() for part in str(value or "").split(",") if part.strip()}
++
++
++def select_indices(
++    data: list[dict[str, Any]],
++    sidecar: dict[str, dict[str, Any]],
++    start: int,
++    limit: int | None,
++    selection: str,
++    seed: int,
++    question_type_filter: set[str] | None = None,
++) -> list[int]:
++    if limit is not None and limit < 0:
++        limit = len(data) - start
++    candidates = []
++    for idx in range(max(start, 0), len(data)):
++        if question_type_filter:
++            ex_id = data[idx].get("id") or f"index_{idx}"
++            qtype = str((sidecar.get(ex_id) or {}).get("question_type", "unknown"))
++            if qtype not in question_type_filter:
++                continue
++        candidates.append(idx)
++    if selection == "first":
++        return candidates[:limit] if limit is not None else candidates
++
++    rng = np.random.default_rng(seed)
++    if selection == "random":
++        shuffled = candidates[:]
++        rng.shuffle(shuffled)
++        return shuffled[:limit] if limit is not None else shuffled
++
++    by_type: dict[str, list[int]] = {}
++    for idx in candidates:
++        ex_id = data[idx].get("id") or f"index_{idx}"
++        qtype = (sidecar.get(ex_id) or {}).get("question_type", "unknown")
++        by_type.setdefault(str(qtype), []).append(idx)
++    for values in by_type.values():
++        rng.shuffle(values)
++    selected: list[int] = []
++    keys = sorted(by_type)
++    while keys and (limit is None or len(selected) < limit):
++        next_keys = []
++        for key in keys:
++            values = by_type[key]
++            if values and (limit is None or len(selected) < limit):
++                selected.append(values.pop())
++            if values:
++                next_keys.append(key)
++        keys = next_keys
++    return selected
++
++
++def build_rows(
++    data: list[dict[str, Any]],
++    sidecar: dict[str, dict[str, Any]],
++    indices: list[int],
++    split: str,
++    args: argparse.Namespace,
++) -> list[dict[str, Any]]:
++    rows = []
++    skipped: dict[str, int] = {}
++    for row_index, dataset_index in enumerate(indices):
++        example = data[dataset_index]
++        ex_id = example.get("id") or f"index_{dataset_index}"
++        meta = sidecar.get(ex_id) or {}
++        answer = str(example.get("answer", "")).strip().upper()
++        if answer not in {"A", "B", "C", "D"}:
++            skipped["invalid_answer"] = skipped.get("invalid_answer", 0) + 1
++            continue
++        try:
++            point_path, point_cloud, object_id = get_or_create_point_cloud(
++                example=example,
++                sidecar=meta,
++                partseg_root=args.partseg_root,
++                cache_dir=args.cache_dir,
++                point_scope=args.point_scope,
++                pointnum=args.pointnum,
++                seed=args.seed,
++            )
++        except Exception as exc:
++            key = f"point_cloud_error:{type(exc).__name__}"
++            skipped[key] = skipped.get(key, 0) + 1
++            print(f"[prepare_physx_mcq] skip id={ex_id} error={exc}", file=sys.stderr)
++            continue
++        if point_cloud.shape != (args.pointnum, 6):
++            raise ValueError(f"Expected point cloud shape ({args.pointnum}, 6), got {point_cloud.shape} for {point_path}")
++        question_type = str(meta.get("question_type", "unknown"))
++        prompt = build_prompt(example.get("prompt", ""), point_token_len=args.point_token_len, prompt_suffix=args.prompt_suffix)
++        extra_info = {
++            "id": ex_id,
++            "index": ex_id,
++            "dataset_index": int(dataset_index),
++            "row_index": int(row_index),
++            "split": split,
++            "object_id": str(object_id),
++            "question_type": question_type,
++            "answer": answer,
++            "pc_path": str(point_path),
++            "point_path": str(point_path),
++            "point_scope": args.point_scope,
++            "pointnum": int(args.pointnum),
++            "seed": int(args.seed),
++            "target_part_label": target_part_label_from_example(example, meta),
++            "image_path": example.get("image_path"),
++            "source": example.get("source"),
++            "answer_text": meta.get("answer_text") or meta.get("target_answer"),
++            "point_preprocessing": DEFAULT_POINT_PROMPT_NOTES,
++            "prompt_suffix": args.prompt_suffix,
++            "prompt_version": "physx_mcq_pointllm_abcd_v1" + ("_suffix" if args.prompt_suffix.strip() else ""),
++        }
++        rows.append(
++            {
++                "data_source": "physx_mcq",
++                "prompt": [{"role": "user", "content": prompt}],
++                "ability": "3d_mcq",
++                "reward_model": {"style": "rule", "ground_truth": answer},
++                "extra_info": extra_info,
++            }
++        )
++    if skipped:
++        print(f"[prepare_physx_mcq] skipped {json.dumps(skipped, sort_keys=True)}", file=sys.stderr)
++    return rows
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--dataset-path", type=Path, default=DEFAULT_DATASET)
++    parser.add_argument("--sidecar-path", type=Path, default=DEFAULT_SIDECAR)
++    parser.add_argument("--partseg-root", type=Path, default=DEFAULT_PARTSEG_ROOT)
++    parser.add_argument("--output-dir", type=Path, required=True)
++    parser.add_argument("--cache-dir", type=Path, default=POINTLLM_ROOT / "outputs" / "physxnet_point_cache")
++    parser.add_argument("--train-subset", type=int, default=20)
++    parser.add_argument("--val-subset", type=int, default=20, help="Use -1 for all remaining examples.")
++    parser.add_argument("--train-start-index", type=int, default=0)
++    parser.add_argument("--val-start-index", type=int, default=0)
++    parser.add_argument("--selection", choices=["first", "random", "stratified"], default="first")
++    parser.add_argument(
++        "--question-type-filter",
++        default="",
++        help="Optional comma-separated PhysX question_type filter, e.g. object_category,joint_type.",
++    )
++    parser.add_argument("--seed", type=int, default=0)
++    parser.add_argument("--pointnum", type=int, default=8192)
++    parser.add_argument("--point-scope", choices=["full_object", "target_part"], default="full_object")
++    parser.add_argument("--point-token-len", type=int, default=POINT_TOKEN_LEN)
++    parser.add_argument("--prompt-suffix", default="")
++    parser.add_argument("--overwrite", action="store_true")
++    args = parser.parse_args()
++
++    output_dir = args.output_dir.expanduser().resolve()
++    train_path = output_dir / "train.parquet"
++    test_path = output_dir / "test.parquet"
++    manifest_path = output_dir / "manifest.json"
++    if not args.overwrite and (train_path.exists() or test_path.exists()):
++        raise FileExistsError(f"Refusing to overwrite existing parquet files under {output_dir}; pass --overwrite")
++
++    data = read_dataset(args.dataset_path)
++    sidecar = read_sidecar(args.sidecar_path)
++    question_type_filter = split_csv_set(args.question_type_filter)
++    train_indices = select_indices(
++        data,
++        sidecar,
++        args.train_start_index,
++        args.train_subset,
++        args.selection,
++        args.seed,
++        question_type_filter=question_type_filter,
++    )
++    val_limit = None if args.val_subset < 0 else args.val_subset
++    val_indices = select_indices(
++        data,
++        sidecar,
++        args.val_start_index,
++        val_limit,
++        args.selection,
++        args.seed + 1,
++        question_type_filter=question_type_filter,
++    )
++
++    args.cache_dir.mkdir(parents=True, exist_ok=True)
++    output_dir.mkdir(parents=True, exist_ok=True)
++    train_rows = build_rows(data, sidecar, train_indices, "train", args)
++    test_rows = build_rows(data, sidecar, val_indices, "test", args)
++    Dataset.from_list(train_rows).to_parquet(str(train_path))
++    Dataset.from_list(test_rows).to_parquet(str(test_path))
++
++    type_counts = {"train": {}, "test": {}}
++    for split, rows in (("train", train_rows), ("test", test_rows)):
++        counts: dict[str, int] = {}
++        for row in rows:
++            qtype = row["extra_info"].get("question_type", "unknown")
++            counts[qtype] = counts.get(qtype, 0) + 1
++        type_counts[split] = dict(sorted(counts.items()))
++
++    manifest = {
++        "dataset_path": str(args.dataset_path),
++        "sidecar_path": str(args.sidecar_path),
++        "partseg_root": str(args.partseg_root),
++        "train_path": str(train_path),
++        "test_path": str(test_path),
++        "num_train": len(train_rows),
++        "num_test": len(test_rows),
++        "question_type_counts": type_counts,
++        "point_scope": args.point_scope,
++        "pointnum": args.pointnum,
++        "seed": args.seed,
++        "cache_dir": str(args.cache_dir),
++        "point_token_len": args.point_token_len,
++        "point_preprocessing": DEFAULT_POINT_PROMPT_NOTES,
++        "selection": args.selection,
++        "question_type_filter": sorted(question_type_filter),
++        "prompt_suffix": args.prompt_suffix,
++    }
++    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
++    print(json.dumps(manifest, ensure_ascii=False, indent=2))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/scripts/validate_physx_mcq_dataset.py b/scripts/validate_physx_mcq_dataset.py
+new file mode 100644
+index 0000000..ee66ea8
+--- /dev/null
++++ b/scripts/validate_physx_mcq_dataset.py
+@@ -0,0 +1,308 @@
++#!/usr/bin/env python
++"""Validate the local PhysXNet MCQ files used by PointLLM evaluation."""
++
++from __future__ import annotations
++
++import argparse
++import collections
++import json
++import re
++from pathlib import Path
++from typing import Any, Dict, List, Optional
++
++
++DEFAULT_DATASET = Path(
++    "/root/autodl-tmp/TTRV/physx_mcq_workspace/PhysX-3D/outputs/physxnet_mcq_verl.json"
++)
++DEFAULT_SIDECAR = Path(
++    "/root/autodl-tmp/TTRV/physx_mcq_workspace/PhysX-3D/outputs/physxnet_mcq.jsonl"
++)
++DEFAULT_OUTPUT = Path("/root/autodl-tmp/TTRV/pointllm-src/outputs/physx_mcq_dataset_validation")
++OPTION_RE = re.compile(r"^\s*([ABCD])\.\s*(.*?)\s*$")
++
++
++def load_dataset(path: Path) -> List[Dict[str, Any]]:
++    with path.open("r", encoding="utf-8") as f:
++        data = json.load(f)
++    if not isinstance(data, list):
++        raise ValueError(f"Expected list in {path}, got {type(data).__name__}")
++    return data
++
++
++def load_sidecar(path: Path) -> Dict[str, Dict[str, Any]]:
++    rows: Dict[str, Dict[str, Any]] = {}
++    with path.open("r", encoding="utf-8") as f:
++        for line in f:
++            if line.strip():
++                row = json.loads(line)
++                rows[row["id"]] = row
++    return rows
++
++
++def parse_prompt_options(prompt: str) -> Dict[str, str]:
++    options: Dict[str, str] = {}
++    for line in prompt.splitlines():
++        match = OPTION_RE.match(line)
++        if match:
++            options[match.group(1)] = match.group(2)
++    return options
++
++
++def normalize_text(text: Any) -> str:
++    return re.sub(r"\s+", " ", str(text or "")).strip().lower()
++
++
++def add_issue(
++    issues: collections.Counter,
++    examples: Dict[str, List[Dict[str, Any]]],
++    key: str,
++    item: Dict[str, Any],
++    detail: str,
++    max_examples: int,
++) -> None:
++    issues[key] += 1
++    bucket = examples.setdefault(key, [])
++    if len(bucket) < max_examples:
++        bucket.append({"id": item.get("id"), "detail": detail})
++
++
++def object_id_from_image_path(image_path: str) -> Optional[str]:
++    marker = "/partseg/"
++    if marker not in image_path:
++        return None
++    return image_path.split(marker, 1)[1].split("/", 1)[0]
++
++
++def validate(args: argparse.Namespace) -> Dict[str, Any]:
++    dataset = load_dataset(args.dataset_path)
++    sidecar = load_sidecar(args.sidecar_path)
++    issues: collections.Counter[str] = collections.Counter()
++    issue_examples: Dict[str, List[Dict[str, Any]]] = {}
++    question_types: collections.Counter[str] = collections.Counter()
++    ids_seen = set()
++
++    for index, item in enumerate(dataset):
++        item_id = item.get("id")
++        if not item_id:
++            add_issue(issues, issue_examples, "missing_id", item, f"dataset_index={index}", args.max_issue_examples)
++            continue
++        if item_id in ids_seen:
++            add_issue(issues, issue_examples, "duplicate_id", item, f"dataset_index={index}", args.max_issue_examples)
++        ids_seen.add(item_id)
++
++        prompt = item.get("prompt")
++        if not isinstance(prompt, str) or not prompt.strip():
++            add_issue(issues, issue_examples, "missing_prompt", item, f"dataset_index={index}", args.max_issue_examples)
++            continue
++
++        if prompt.count("<image>") != 1:
++            add_issue(
++                issues,
++                issue_examples,
++                "image_placeholder_count_not_one",
++                item,
++                f"count={prompt.count('<image>')}",
++                args.max_issue_examples,
++            )
++        for phrase, key in [
++            ("Choose the correct answer from the options below", "missing_choose_instruction"),
++            ("respond with only the corresponding option letter", "missing_letter_only_instruction"),
++            ("Do not include any explanation or extra text", "missing_no_explanation_instruction"),
++            ("Options:", "missing_options_header"),
++        ]:
++            if phrase not in prompt:
++                add_issue(issues, issue_examples, key, item, phrase, args.max_issue_examples)
++
++        options = parse_prompt_options(prompt)
++        if set(options) != {"A", "B", "C", "D"}:
++            add_issue(
++                issues,
++                issue_examples,
++                "malformed_prompt_options",
++                item,
++                f"letters={sorted(options)}",
++                args.max_issue_examples,
++            )
++        if len({normalize_text(v) for v in options.values()}) != len(options):
++            add_issue(issues, issue_examples, "duplicate_prompt_option_text", item, str(options), args.max_issue_examples)
++
++        answer = str(item.get("answer", "")).strip().upper()
++        if answer not in {"A", "B", "C", "D"}:
++            add_issue(issues, issue_examples, "invalid_answer_letter", item, repr(item.get("answer")), args.max_issue_examples)
++        elif answer not in options:
++            add_issue(
++                issues,
++                issue_examples,
++                "answer_letter_missing_from_prompt_options",
++                item,
++                f"answer={answer}, options={sorted(options)}",
++                args.max_issue_examples,
++            )
++
++        image_path = Path(str(item.get("image_path", "")))
++        if not image_path.exists():
++            add_issue(issues, issue_examples, "missing_image_path", item, str(image_path), args.max_issue_examples)
++        object_id_from_path = object_id_from_image_path(str(image_path))
++        if object_id_from_path:
++            obj_dir = image_path.parents[1] / "objs"
++            if not obj_dir.exists() or not any(obj_dir.glob("*.obj")):
++                add_issue(issues, issue_examples, "missing_object_obj_files", item, str(obj_dir), args.max_issue_examples)
++        else:
++            add_issue(issues, issue_examples, "cannot_parse_object_id_from_image_path", item, str(image_path), args.max_issue_examples)
++
++        meta = sidecar.get(item_id)
++        if meta is None:
++            add_issue(issues, issue_examples, "missing_sidecar_row", item, item_id, args.max_issue_examples)
++            continue
++
++        question_type = meta.get("question_type", "unknown")
++        question_types[question_type] += 1
++        if str(meta.get("object_id")) != str(object_id_from_path):
++            add_issue(
++                issues,
++                issue_examples,
++                "object_id_mismatch_sidecar_image_path",
++                item,
++                f"sidecar={meta.get('object_id')} image_path={object_id_from_path}",
++                args.max_issue_examples,
++            )
++
++        answer_index = meta.get("answer_index")
++        if not isinstance(answer_index, int) or not 0 <= answer_index <= 3:
++            add_issue(issues, issue_examples, "invalid_sidecar_answer_index", item, repr(answer_index), args.max_issue_examples)
++        else:
++            expected_letter = "ABCD"[answer_index]
++            if answer != expected_letter:
++                add_issue(
++                    issues,
++                    issue_examples,
++                    "answer_letter_sidecar_index_mismatch",
++                    item,
++                    f"dataset={answer} sidecar={expected_letter}",
++                    args.max_issue_examples,
++                )
++
++        choices = meta.get("choices")
++        if not isinstance(choices, list) or len(choices) != 4:
++            add_issue(issues, issue_examples, "invalid_sidecar_choices", item, repr(choices), args.max_issue_examples)
++        elif set(options) == {"A", "B", "C", "D"}:
++            for letter, choice in zip("ABCD", choices):
++                if normalize_text(options[letter]) != normalize_text(choice):
++                    add_issue(
++                        issues,
++                        issue_examples,
++                        "prompt_sidecar_choice_mismatch",
++                        item,
++                        f"{letter}: prompt={options[letter]!r} sidecar={choice!r}",
++                        args.max_issue_examples,
++                    )
++                    break
++            if isinstance(answer_index, int) and 0 <= answer_index <= 3:
++                answer_text = meta.get("answer")
++                if normalize_text(answer_text) != normalize_text(choices[answer_index]):
++                    add_issue(
++                        issues,
++                        issue_examples,
++                        "sidecar_answer_text_mismatch",
++                        item,
++                        f"answer={answer_text!r} choice={choices[answer_index]!r}",
++                        args.max_issue_examples,
++                    )
++
++    missing_from_dataset = sorted(set(sidecar) - ids_seen)
++    if missing_from_dataset:
++        issues["sidecar_rows_not_in_dataset"] = len(missing_from_dataset)
++        issue_examples["sidecar_rows_not_in_dataset"] = [
++            {"id": item_id, "detail": "sidecar id absent from verl JSON"} for item_id in missing_from_dataset[: args.max_issue_examples]
++        ]
++
++    hard_issue_keys = {
++        key
++        for key in issues
++        if key
++        not in {
++            "missing_no_explanation_instruction",
++            "missing_letter_only_instruction",
++            "missing_choose_instruction",
++        }
++    }
++    return {
++        "dataset_path": str(args.dataset_path),
++        "sidecar_path": str(args.sidecar_path),
++        "num_dataset": len(dataset),
++        "num_sidecar": len(sidecar),
++        "question_type_counts": dict(question_types),
++        "issues": dict(issues),
++        "issue_examples": issue_examples,
++        "requires_dataset_fix": bool(hard_issue_keys),
++        "verl_prompt_compatibility": {
++            "has_image_placeholder": issues.get("image_placeholder_count_not_one", 0) == 0,
++            "has_options_header": issues.get("missing_options_header", 0) == 0,
++            "has_abcd_options": issues.get("malformed_prompt_options", 0) == 0,
++            "has_letter_only_instruction": issues.get("missing_letter_only_instruction", 0) == 0,
++            "has_no_explanation_instruction": issues.get("missing_no_explanation_instruction", 0) == 0,
++        },
++    }
++
++
++def render_markdown(report: Dict[str, Any]) -> str:
++    lines = [
++        "# PhysX MCQ Dataset Validation",
++        "",
++        f"- Dataset path: `{report['dataset_path']}`",
++        f"- Sidecar path: `{report['sidecar_path']}`",
++        f"- Dataset rows: {report['num_dataset']}",
++        f"- Sidecar rows: {report['num_sidecar']}",
++        f"- Requires dataset fix: {report['requires_dataset_fix']}",
++        "",
++        "## Question Types",
++        "",
++    ]
++    for key, value in sorted(report["question_type_counts"].items()):
++        lines.append(f"- {key}: {value}")
++    lines.extend(["", "## Issues", ""])
++    if report["issues"]:
++        for key, value in sorted(report["issues"].items()):
++            lines.append(f"- {key}: {value}")
++    else:
++        lines.append("- none")
++    lines.extend(["", "## VERL Prompt Compatibility", ""])
++    for key, value in report["verl_prompt_compatibility"].items():
++        lines.append(f"- {key}: {value}")
++    lines.extend(["", "## Issue Examples", ""])
++    if report["issue_examples"]:
++        for key, examples in sorted(report["issue_examples"].items()):
++            lines.append(f"### {key}")
++            for example in examples:
++                lines.append(f"- {example['id']}: {example['detail']}")
++    else:
++        lines.append("- none")
++    lines.append("")
++    return "\n".join(lines)
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--dataset_path", type=Path, default=DEFAULT_DATASET)
++    parser.add_argument("--sidecar_path", type=Path, default=DEFAULT_SIDECAR)
++    parser.add_argument("--output_prefix", type=Path, default=DEFAULT_OUTPUT)
++    parser.add_argument("--max_issue_examples", type=int, default=20)
++    return parser.parse_args()
++
++
++def main() -> int:
++    args = parse_args()
++    report = validate(args)
++    args.output_prefix.parent.mkdir(parents=True, exist_ok=True)
++    json_path = args.output_prefix.with_suffix(".json")
++    md_path = args.output_prefix.with_suffix(".md")
++    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
++    md_path.write_text(render_markdown(report), encoding="utf-8")
++    print(json.dumps(report, ensure_ascii=False, indent=2))
++    print(f"Wrote {json_path}")
++    print(f"Wrote {md_path}")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
