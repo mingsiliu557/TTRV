@@ -186,6 +186,13 @@ reward_model:
     n_samples_per_prompt: 8
     n_votes_per_prompt: 8
     mode: "train"
+    reward_style: "frequency_entropy"
+    soft_label_gamma: 2.0
+    unknown_reward: 0.0
+    all_unknown_reward: 0.0
+    entropy_coef: 0.75
+    answer_parse_mode: legacy
+    harmony_transform_type: photometric
 
 custom_reward_function:
   path: null

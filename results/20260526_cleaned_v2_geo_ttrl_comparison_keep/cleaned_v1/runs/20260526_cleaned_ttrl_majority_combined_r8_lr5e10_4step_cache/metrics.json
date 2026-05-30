@@ -1,0 +1,91 @@
+{
+  "num_evaluated": 10572,
+  "num_correct": 4087,
+  "accuracy": 0.386587211502081,
+  "invalid_outputs": 106,
+  "hit_max_response_length_outputs": 1080,
+  "hit_max_response_length_rate": 0.1021566401816118,
+  "response_token_len_mean": 17.653707907680666,
+  "response_token_len_max": 24.0,
+  "prediction_distribution": {
+    "A": 1875,
+    "B": 1987,
+    "C": 2302,
+    "D": 4302,
+    "unknown": 106
+  },
+  "ttrl_pseudo_label_distribution": {
+    "A": 1875,
+    "B": 1987,
+    "C": 2302,
+    "D": 4302,
+    "none": 106
+  },
+  "accuracy_by_question_type": {
+    "joint_type": {
+      "num_evaluated": 9118,
+      "num_correct": 3705,
+      "invalid_outputs": 68,
+      "accuracy": 0.4063391094538276
+    },
+    "movable_part": {
+      "num_evaluated": 1454,
+      "num_correct": 382,
+      "invalid_outputs": 38,
+      "accuracy": 0.2627235213204952
+    }
+  },
+  "ttrv_metrics": {
+    "num_groups": 10572,
+    "mean_votes_per_group": 1.0,
+    "response_accuracy": 0.386587211502081,
+    "acc_at_1": 0.386587211502081,
+    "majority_accuracy": 0.386587211502081,
+    "pass_at_votes": 0.386587211502081,
+    "best_accuracy_at_votes": 0.386587211502081,
+    "worst_accuracy_at_votes": 0.386587211502081,
+    "vote_invalid_rate": 0.0100264850548619,
+    "group_invalid_rate": 0.0100264850548619,
+    "frequency_mean": 1.0,
+    "normalized_entropy_mean": 0.0,
+    "raw_entropy_mean": -1.0000889005818951e-12,
+    "ttrv_reward_mean": 0.9899735149451381,
+    "reward_mean": 0.386587211502081,
+    "unique_pred_ratio_mean": 1.0,
+    "group_unknown_rate_mean": 0.0,
+    "ttrl_majority_count_mean": 1.0,
+    "ttrl_majority_ratio_mean": 1.0,
+    "ttrl_majority_tie_mean": 0.0,
+    "ttrl_max_majority_ratio_mean": 1.0,
+    "geo_harmony_hm_mean": 0.0,
+    "geo_original_majority_ratio_mean": 0.0,
+    "geo_original_majority_tie_mean": 0.0,
+    "geo_view_support_mean": 0.0,
+    "geo_skipped_rate": 0.0
+  },
+  "ttrv_metrics_by_question_type": {
+    "joint_type": {
+      "num_groups": 9118,
+      "mean_votes_per_group": 1.0,
+      "response_accuracy": 0.4063391094538276,
+      "acc_at_1": 0.4063391094538276,
+      "majority_accuracy": 0.4063391094538276,
+      "pass_at_votes": 0.4063391094538276,
+      "best_accuracy_at_votes": 0.4063391094538276,
+      "worst_accuracy_at_votes": 0.4063391094538276,
+      "invalid_rate": 0.007457775828032464
+    },
+    "movable_part": {
+      "num_groups": 1454,
+      "mean_votes_per_group": 1.0,
+      "response_accuracy": 0.2627235213204952,
+      "acc_at_1": 0.2627235213204952,
+      "majority_accuracy": 0.2627235213204952,
+      "pass_at_votes": 0.2627235213204952,
+      "best_accuracy_at_votes": 0.2627235213204952,
+      "worst_accuracy_at_votes": 0.2627235213204952,
+      "invalid_rate": 0.026134800550206328
+    }
+  },
+  "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_ttrl_majority_combined_r8_lr5e10_4step_cache/validation_predictions_step1.jsonl"
+}

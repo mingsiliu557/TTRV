@@ -1,0 +1,378 @@
+{
+  "run_dir": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/runs/20260526_v2_pragmatic_geo_harmony_strict_view075_r8_lr5e10_2step_b4",
+  "validation": [
+    {
+      "step": 0,
+      "n": 8365,
+      "accuracy": 0.5005379557680812,
+      "invalid_rate": 0.015780035863717873,
+      "hit_max_response_length_rate": 0.05762104004781829,
+      "prediction_distribution": {
+        "A": 3651,
+        "B": 2011,
+        "C": 2016,
+        "D": 555,
+        "unknown": 132
+      },
+      "accuracy_by_question_type": {
+        "joint_type": {
+          "n": 7669,
+          "accuracy": 0.5223627591602555,
+          "invalid_rate": 0.016299387143043423,
+          "hit_max_response_length_rate": 0.05854739861781197
+        },
+        "movable_part": {
+          "n": 696,
+          "accuracy": 0.2600574712643678,
+          "invalid_rate": 0.010057471264367816,
+          "hit_max_response_length_rate": 0.04741379310344827
+        }
+      },
+      "confusion": {
+        "A": {
+          "A": 1569,
+          "B": 189,
+          "C": 231,
+          "D": 52,
+          "unknown": 35
+        },
+        "B": {
+          "A": 650,
+          "B": 1085,
+          "C": 254,
+          "D": 56,
+          "unknown": 29
+        },
+        "C": {
+          "A": 582,
+          "B": 254,
+          "C": 1163,
+          "D": 77,
+          "unknown": 32
+        },
+        "D": {
+          "A": 850,
+          "B": 483,
+          "C": 368,
+          "D": 370,
+          "unknown": 36
+        }
+      }
+    },
+    {
+      "step": 1,
+      "n": 8365,
+      "accuracy": 0.5032875074716079,
+      "invalid_rate": 0.013269575612671848,
+      "hit_max_response_length_rate": 0.06060968320382546,
+      "prediction_distribution": {
+        "A": 3605,
+        "B": 2001,
+        "C": 2034,
+        "D": 614,
+        "unknown": 111
+      },
+      "accuracy_by_question_type": {
+        "joint_type": {
+          "n": 7669,
+          "accuracy": 0.5254922414917199,
+          "invalid_rate": 0.013300299908723431,
+          "hit_max_response_length_rate": 0.06128569565784327
+        },
+        "movable_part": {
+          "n": 696,
+          "accuracy": 0.25862068965517243,
+          "invalid_rate": 0.01293103448275862,
+          "hit_max_response_length_rate": 0.05316091954022988
+        }
+      },
+      "confusion": {
+        "A": {
+          "A": 1572,
+          "B": 185,
+          "C": 233,
+          "D": 61,
+          "unknown": 25
+        },
+        "B": {
+          "A": 639,
+          "B": 1079,
+          "C": 256,
+          "D": 71,
+          "unknown": 29
+        },
+        "C": {
+          "A": 579,
+          "B": 243,
+          "C": 1167,
+          "D": 90,
+          "unknown": 29
+        },
+        "D": {
+          "A": 815,
+          "B": 494,
+          "C": 378,
+          "D": 392,
+          "unknown": 28
+        }
+      },
+      "flip_vs_step0": {
+        "overall": {
+          "same_wrong": 3887,
+          "same_correct": 3919,
+          "gain": 291,
+          "loss": 268
+        },
+        "by_question_type": {
+          "joint_type": {
+            "gain": 271,
+            "loss": 247
+          },
+          "movable_part": {
+            "gain": 20,
+            "loss": 21
+          }
+        },
+        "net_gain": 23
+      }
+    },
+    {
+      "step": 2,
+      "n": 8365,
+      "accuracy": 0.4982665869695158,
+      "invalid_rate": 0.011476389719067543,
+      "hit_max_response_length_rate": 0.05726240286909743,
+      "prediction_distribution": {
+        "A": 3561,
+        "B": 2054,
+        "C": 2041,
+        "D": 613,
+        "unknown": 96
+      },
+      "accuracy_by_question_type": {
+        "joint_type": {
+          "n": 7669,
+          "accuracy": 0.5206676228973791,
+          "invalid_rate": 0.011996348937279959,
+          "hit_max_response_length_rate": 0.058938583909245015
+        },
+        "movable_part": {
+          "n": 696,
+          "accuracy": 0.2514367816091954,
+          "invalid_rate": 0.005747126436781609,
+          "hit_max_response_length_rate": 0.03879310344827586
+        }
+      },
+      "confusion": {
+        "A": {
+          "A": 1529,
+          "B": 210,
+          "C": 249,
+          "D": 63,
+          "unknown": 25
+        },
+        "B": {
+          "A": 644,
+          "B": 1081,
+          "C": 259,
+          "D": 67,
+          "unknown": 23
+        },
+        "C": {
+          "A": 583,
+          "B": 256,
+          "C": 1160,
+          "D": 85,
+          "unknown": 24
+        },
+        "D": {
+          "A": 805,
+          "B": 507,
+          "C": 373,
+          "D": 398,
+          "unknown": 24
+        }
+      },
+      "flip_vs_step0": {
+        "overall": {
+          "same_wrong": 3805,
+          "same_correct": 3795,
+          "gain": 373,
+          "loss": 392
+        },
+        "by_question_type": {
+          "joint_type": {
+            "gain": 346,
+            "loss": 359
+          },
+          "movable_part": {
+            "loss": 33,
+            "gain": 27
+          }
+        },
+        "net_gain": -19
+      }
+    }
+  ],
+  "training": [
+    {
+      "step": 1,
+      "num_groups": 4,
+      "pass_at_8": 1.0,
+      "majority_at_8": 0.5,
+      "response_accuracy": 0.40625,
+      "selected_groups": 0,
+      "selected_precision": null,
+      "groups": [
+        {
+          "question_id": "physxnet_mcq_00000005",
+          "question_type": "joint_type",
+          "answer": "B",
+          "pred_counts": {
+            "A": 3,
+            "C": 3,
+            "B": 2
+          },
+          "pass_at_8": true,
+          "majority_prediction": "tie",
+          "majority_correct": false,
+          "geo_label": "none",
+          "geo_correct": null,
+          "geo_total_ratio": 0.0,
+          "geo_hm": 0.0
+        },
+        {
+          "question_id": "physxnet_mcq_00000008",
+          "question_type": "joint_type",
+          "answer": "A",
+          "pred_counts": {
+            "C": 2,
+            "B": 1,
+            "A": 5
+          },
+          "pass_at_8": true,
+          "majority_prediction": "A",
+          "majority_correct": true,
+          "geo_label": "none",
+          "geo_correct": null,
+          "geo_total_ratio": 0.0,
+          "geo_hm": 0.0
+        },
+        {
+          "question_id": "physxnet_mcq_00000020",
+          "question_type": "joint_type",
+          "answer": "B",
+          "pred_counts": {
+            "B": 2,
+            "D": 2,
+            "A": 3,
+            "C": 1
+          },
+          "pass_at_8": true,
+          "majority_prediction": "A",
+          "majority_correct": false,
+          "geo_label": "none",
+          "geo_correct": null,
+          "geo_total_ratio": 0.0,
+          "geo_hm": 0.0
+        },
+        {
+          "question_id": "physxnet_mcq_00000022",
+          "question_type": "joint_type",
+          "answer": "D",
+          "pred_counts": {
+            "D": 4,
+            "C": 2,
+            "A": 2
+          },
+          "pass_at_8": true,
+          "majority_prediction": "D",
+          "majority_correct": true,
+          "geo_label": "none",
+          "geo_correct": null,
+          "geo_total_ratio": 0.0,
+          "geo_hm": 0.0
+        }
+      ]
+    },
+    {
+      "step": 2,
+      "num_groups": 4,
+      "pass_at_8": 0.5,
+      "majority_at_8": 0.0,
+      "response_accuracy": 0.125,
+      "selected_groups": 1,
+      "selected_precision": 0.0,
+      "groups": [
+        {
+          "question_id": "physxnet_mcq_00000023",
+          "question_type": "joint_type",
+          "answer": "D",
+          "pred_counts": {
+            "C": 6,
+            "D": 1,
+            "unknown": 1
+          },
+          "pass_at_8": true,
+          "majority_prediction": "C",
+          "majority_correct": false,
+          "geo_label": "C",
+          "geo_correct": false,
+          "geo_total_ratio": 0.75,
+          "geo_hm": 0.750001
+        },
+        {
+          "question_id": "physxnet_mcq_00000024",
+          "question_type": "joint_type",
+          "answer": "D",
+          "pred_counts": {
+            "A": 4,
+            "B": 3,
+            "unknown": 1
+          },
+          "pass_at_8": false,
+          "majority_prediction": "A",
+          "majority_correct": false,
+          "geo_label": "none",
+          "geo_correct": null,
+          "geo_total_ratio": 0.0,
+          "geo_hm": 0.0
+        },
+        {
+          "question_id": "physxnet_mcq_00000026",
+          "question_type": "joint_type",
+          "answer": "D",
+          "pred_counts": {
+            "C": 5,
+            "B": 3
+          },
+          "pass_at_8": false,
+          "majority_prediction": "C",
+          "majority_correct": false,
+          "geo_label": "none",
+          "geo_correct": null,
+          "geo_total_ratio": 0.0,
+          "geo_hm": 0.0
+        },
+        {
+          "question_id": "physxnet_mcq_00000027",
+          "question_type": "joint_type",
+          "answer": "C",
+          "pred_counts": {
+            "B": 4,
+            "C": 3,
+            "A": 1
+          },
+          "pass_at_8": true,
+          "majority_prediction": "B",
+          "majority_correct": false,
+          "geo_label": "none",
+          "geo_correct": null,
+          "geo_total_ratio": 0.0,
+          "geo_hm": 0.0
+        }
+      ]
+    }
+  ],
+  "best_step_by_accuracy": 1
+}

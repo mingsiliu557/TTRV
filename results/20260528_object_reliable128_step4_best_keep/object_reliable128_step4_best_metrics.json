@@ -1,0 +1,51 @@
+{
+  "title": "object_category reliable128 diverse_text Geo-Harmony soft best step4",
+  "source_run_dir": "/root/autodl-tmp/TTRV/outputs/physx_reliable128_soft_keep/runs/20260528_object_original_reliable128_diverse_text_geo_harmony_soft_r8_lr5e10_gamma2_32step_test4_b4_keep",
+  "results_index_dir": "/root/autodl-tmp/TTRV/results/20260528_object_reliable128_step4_best_keep",
+  "dataset_dir": "/root/autodl-tmp/TTRV/outputs/physx_reliable128_soft_keep/object_category_original_step0_reliable128_diverse_text_keep",
+  "step0_acc": 0.39510718632009234,
+  "best_step": 4,
+  "best_step_acc": 0.40390676194339564,
+  "best_delta_abs": 0.008799575623303302,
+  "best_delta_points": 0.8799575623303302,
+  "step8_acc": 0.24451586731987393,
+  "step8_delta_abs": -0.1505913190002184,
+  "key_params": {
+    "sample": "128 selected training rows, but step4 uses first 16 rows with TRAIN_BATCH_SIZE=4",
+    "reward_variant": "geo_harmony_soft",
+    "rollout_n": 8,
+    "geo_num_views": 2,
+    "geo_samples_per_view": 4,
+    "geo_soft_gamma": 2.0,
+    "actor_lr": "5e-10",
+    "kl_loss_coef": 0.3,
+    "validation": "full object_category, 32047 examples, deterministic acc@1"
+  },
+  "files": {
+    "best_metrics": "/root/autodl-tmp/TTRV/results/20260528_object_reliable128_step4_best_keep/best_validation_metrics.json",
+    "step4_metrics": "/root/autodl-tmp/TTRV/results/20260528_object_reliable128_step4_best_keep/val_metrics_step4.json",
+    "step4_predictions_symlink": "/root/autodl-tmp/TTRV/results/20260528_object_reliable128_step4_best_keep/validation_predictions_step4.jsonl",
+    "source_step4_predictions": "/root/autodl-tmp/TTRV/outputs/physx_reliable128_soft_keep/runs/20260528_object_original_reliable128_diverse_text_geo_harmony_soft_r8_lr5e10_gamma2_32step_test4_b4_keep/validation_predictions_step4.jsonl"
+  },
+  "checkpoint_note": "No recoverable step4 checkpoint was saved in this run because SAVE_FREQ=-1; preserved artifacts are predictions, logs, metrics, and command/config. Re-run with SAVE_FREQ=1 is needed to save weights at step4.",
+  "training_samples": {
+    "first128_answer_counts": {
+      "A": 32,
+      "B": 32,
+      "C": 32,
+      "D": 32
+    },
+    "first16_answer_counts": {
+      "A": 4,
+      "B": 4,
+      "C": 4,
+      "D": 4
+    },
+    "first128_rows_parquet": "/root/autodl-tmp/TTRV/results/20260528_object_reliable128_step4_best_keep/training_samples/selected_training_rows_first128.parquet",
+    "first16_rows_parquet": "/root/autodl-tmp/TTRV/results/20260528_object_reliable128_step4_best_keep/training_samples/best_step_consumed_rows_first16.parquet",
+    "selected_jsonl": "/root/autodl-tmp/TTRV/results/20260528_object_reliable128_step4_best_keep/training_samples/selected_training_samples_128.jsonl",
+    "best_step_consumed_jsonl": "/root/autodl-tmp/TTRV/results/20260528_object_reliable128_step4_best_keep/training_samples/best_step_consumed_samples_first16.jsonl",
+    "source_dataset_dir": "/root/autodl-tmp/TTRV/outputs/physx_reliable128_soft_keep/object_category_original_step0_reliable128_diverse_text_keep",
+    "note": "Step4 best uses TRAIN_BATCH_SIZE=4, so the first 16 selected samples are the consumed adaptation prompts before validation step4."
+  }
+}

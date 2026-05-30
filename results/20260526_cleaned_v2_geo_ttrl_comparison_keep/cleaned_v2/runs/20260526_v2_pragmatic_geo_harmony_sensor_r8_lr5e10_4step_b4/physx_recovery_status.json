@@ -1,0 +1,73 @@
+{
+  "enabled": true,
+  "best": {
+    "step": 1,
+    "metric": 0.5016138673042438,
+    "snapshot": {
+      "acc": 0.5016138673042438,
+      "invalid_rate": 0.014584578601315004,
+      "hit_max_response_length_rate": 0.05917513448894202,
+      "qtype_acc": {
+        "joint_type": 0.5237971052288434,
+        "movable_part": 0.257183908045977
+      }
+    },
+    "checkpoint_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/runs/20260526_v2_pragmatic_geo_harmony_sensor_r8_lr5e10_4step_b4/checkpoints/global_step_1"
+  },
+  "history": [
+    {
+      "step": 0,
+      "metric": 0.5005379557680812,
+      "snapshot": {
+        "acc": 0.5005379557680812,
+        "invalid_rate": 0.015780035863717873,
+        "hit_max_response_length_rate": 0.05762104004781829,
+        "qtype_acc": {
+          "joint_type": 0.5223627591602555,
+          "movable_part": 0.2600574712643678
+        }
+      }
+    },
+    {
+      "step": 1,
+      "metric": 0.5016138673042438,
+      "snapshot": {
+        "acc": 0.5016138673042438,
+        "invalid_rate": 0.014584578601315004,
+        "hit_max_response_length_rate": 0.05917513448894202,
+        "qtype_acc": {
+          "joint_type": 0.5237971052288434,
+          "movable_part": 0.257183908045977
+        }
+      }
+    },
+    {
+      "step": 2,
+      "metric": 0.49982068141063957,
+      "snapshot": {
+        "acc": 0.49982068141063957,
+        "invalid_rate": 0.012074118350268977,
+        "hit_max_response_length_rate": 0.059414225941422594,
+        "qtype_acc": {
+          "joint_type": 0.5213195983831008,
+          "movable_part": 0.2629310344827586
+        }
+      }
+    }
+  ],
+  "last": {
+    "step": 2,
+    "metric": 0.49982068141063957,
+    "snapshot": {
+      "acc": 0.49982068141063957,
+      "invalid_rate": 0.012074118350268977,
+      "hit_max_response_length_rate": 0.059414225941422594,
+      "qtype_acc": {
+        "joint_type": 0.5213195983831008,
+        "movable_part": 0.2629310344827586
+      }
+    },
+    "saved": false,
+    "best_step": 1
+  }
+}

@@ -1,0 +1,7 @@
+Could not override 'trainer.val_only'.
+To append to your config use +trainer.val_only=True
+Key 'val_only' is not in struct
+    full_key: trainer.val_only
+    object_type=dict
+
+Set the environment variable HYDRA_FULL_ERROR=1 for a complete stack trace.

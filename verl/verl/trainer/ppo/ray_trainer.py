@@ -17,6 +17,8 @@ This trainer supports model-agonistic model initialization with huggingface
 """
 
 import os
+import hashlib
+import random
 import uuid
 from collections import defaultdict
 from contextlib import contextmanager
@@ -54,6 +56,182 @@ from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seql
 from verl.utils.tracking import ValidationGenerationsLogger
 
 WorkerType = Type[Worker]
+
+
+def _harmony_seed(global_step, sample_index, image_index):
+    raw = f"{global_step}:{sample_index}:{image_index}".encode("utf-8")
+    return int(hashlib.md5(raw).hexdigest()[:8], 16)
+
+
+def _canonical_harmony_transform_type(transform_type):
+    aliases = {
+        "photometric": "photometric_weak",
+        "center_crop_resize": "center_crop_s092",
+    }
+    return aliases.get(transform_type, transform_type)
+
+
+def _center_crop_resize(image, scale):
+    width, height = image.size
+    crop_width = max(1, int(width * scale))
+    crop_height = max(1, int(height * scale))
+    left = (width - crop_width) // 2
+    top = (height - crop_height) // 2
+    image = image.crop((left, top, left + crop_width, top + crop_height))
+    return image.resize((width, height))
+
+
+def _random_crop_resize(image, rng, min_scale):
+    width, height = image.size
+    scale = min(1.0, min_scale + (1.0 - min_scale) * rng.random())
+    crop_width = max(1, int(width * scale))
+    crop_height = max(1, int(height * scale))
+    max_left = max(0, width - crop_width)
+    max_top = max(0, height - crop_height)
+    left = rng.randint(0, max_left) if max_left else 0
+    top = rng.randint(0, max_top) if max_top else 0
+    image = image.crop((left, top, left + crop_width, top + crop_height))
+    return image.resize((width, height)), scale
+
+
+def _apply_photometric_jitter(image, rng, strength):
+    from PIL import ImageEnhance
+
+    if strength == "weak":
+        ranges = {
+            "brightness": (0.9, 1.1),
+            "contrast": (0.9, 1.1),
+            "color": (0.95, 1.05),
+            "sharpness": (0.95, 1.10),
+        }
+    elif strength == "medium":
+        ranges = {
+            "brightness": (0.8, 1.2),
+            "contrast": (0.85, 1.15),
+            "color": (0.85, 1.15),
+            "sharpness": (0.85, 1.25),
+        }
+    elif strength == "strong":
+        ranges = {
+            "brightness": (0.65, 1.35),
+            "contrast": (0.7, 1.3),
+            "color": (0.7, 1.3),
+            "sharpness": (0.7, 1.4),
+        }
+    else:
+        raise ValueError(f"Unsupported photometric strength: {strength}")
+
+    enhancers = [
+        ("brightness", ImageEnhance.Brightness),
+        ("contrast", ImageEnhance.Contrast),
+        ("color", ImageEnhance.Color),
+        ("sharpness", ImageEnhance.Sharpness),
+    ]
+    factors = {}
+    for name, enhancer_cls in enhancers:
+        low, high = ranges[name]
+        factor = low + (high - low) * rng.random()
+        image = enhancer_cls(image).enhance(factor)
+        factors[name] = factor
+    return image, factors
+
+
+def _add_gaussian_noise(image, rng, noise_std):
+    if noise_std <= 0:
+        return image
+    arr = np.asarray(image).astype(np.float32)
+    noise_rng = np.random.default_rng(rng.randint(0, 2**32 - 1))
+    arr = np.clip(arr + noise_rng.normal(0.0, noise_std * 255.0, arr.shape), 0, 255).astype(np.uint8)
+    from PIL import Image
+
+    return Image.fromarray(arr, mode="RGB")
+
+
+def _transform_harmony_image(image, transform_type, seed, return_metadata=False):
+    from PIL import ImageFilter, ImageOps
+
+    image = image.convert("RGB").copy()
+    canonical_type = _canonical_harmony_transform_type(transform_type)
+    rng = random.Random(seed)
+    metadata = {
+        "harmony_transform_type": canonical_type,
+        "requested_harmony_transform_type": transform_type,
+        "direction_safe": True,
+        "crop_scale": None,
+        "photometric_strength": None,
+        "photometric_factors": {},
+        "blur_sigma": 0.0,
+        "noise_std": 0.0,
+        "flip_applied": False,
+    }
+
+    if canonical_type.startswith("center_crop_s"):
+        try:
+            scale = int(canonical_type.removeprefix("center_crop_s")) / 100.0
+        except ValueError as exc:
+            raise ValueError(f"Unsupported vision self-harmony transform type: {transform_type}") from exc
+        if not (0.0 < scale <= 1.0):
+            raise ValueError(f"Invalid center crop scale for transform type: {transform_type}")
+        metadata["crop_scale"] = scale
+        image = _center_crop_resize(image, scale)
+    elif canonical_type.startswith("photometric_"):
+        strength = canonical_type.removeprefix("photometric_")
+        metadata["photometric_strength"] = strength
+        image, metadata["photometric_factors"] = _apply_photometric_jitter(image, rng, strength)
+    elif canonical_type in {"cotta_weak_noflip", "cotta_strong_noflip", "multi_aug_safe", "cotta_strong_dtd_flip"}:
+        strong = canonical_type in {"cotta_strong_noflip", "multi_aug_safe", "cotta_strong_dtd_flip"}
+        metadata["photometric_strength"] = "strong" if strong else "medium"
+        image, metadata["photometric_factors"] = _apply_photometric_jitter(
+            image, rng, metadata["photometric_strength"]
+        )
+        image, crop_scale = _random_crop_resize(image, rng, 0.88 if strong else 0.94)
+        metadata["crop_scale"] = crop_scale
+        metadata["blur_sigma"] = (0.001 + (0.50 if strong else 0.25) * rng.random())
+        image = image.filter(ImageFilter.GaussianBlur(radius=metadata["blur_sigma"]))
+        metadata["noise_std"] = 0.005 if strong else 0.0025
+        image = _add_gaussian_noise(image, rng, metadata["noise_std"])
+        if canonical_type == "cotta_strong_dtd_flip":
+            metadata["direction_safe"] = False
+            metadata["flip_applied"] = rng.random() < 0.5
+            if metadata["flip_applied"]:
+                image = ImageOps.mirror(image)
+    else:
+        raise ValueError(f"Unsupported vision self-harmony transform type: {transform_type}")
+
+    if return_metadata:
+        return image, metadata
+    return image
+
+
+def _build_harmony_transform_batch(gen_batch: DataProto, source_batch: DataProto, transform_type: str, global_step: int):
+    transform_batch = deepcopy(gen_batch)
+    if "multi_modal_data" not in transform_batch.non_tensor_batch:
+        raise ValueError("vision_self_harmony requires multi_modal_data")
+
+    transformed_multi_modal_data = []
+    transform_metadata = []
+    for sample_i, multi_modal_data in enumerate(transform_batch.non_tensor_batch["multi_modal_data"]):
+        new_multi_modal_data = {}
+        sample_metadata = []
+        for key, value in multi_modal_data.items():
+            if key != "image":
+                new_multi_modal_data[key] = deepcopy(value)
+                continue
+            transformed_images = []
+            for image_i, image in enumerate(value):
+                transformed_image, metadata = _transform_harmony_image(
+                    image,
+                    transform_type=transform_type,
+                    seed=_harmony_seed(global_step, sample_i, image_i),
+                    return_metadata=True,
+                )
+                transformed_images.append(transformed_image)
+                sample_metadata.append(metadata)
+            new_multi_modal_data[key] = transformed_images
+        transformed_multi_modal_data.append(new_multi_modal_data)
+        transform_metadata.append(sample_metadata[0] if len(sample_metadata) == 1 else sample_metadata)
+    transform_batch.non_tensor_batch["multi_modal_data"] = np.array(transformed_multi_modal_data, dtype=object)
+    return transform_batch, transform_metadata
 
 
 class Role(Enum):
@@ -1063,6 +1241,24 @@ class RayPPOTrainer:
                         meta_info_keys=["do_vote"]
                     )
 
+                use_vision_self_harmony = (
+                    self.use_ttrl
+                    and self.config.reward_model.reward_kwargs.get("reward_style", None) == "vision_self_harmony"
+                )
+                if use_vision_self_harmony:
+                    harmony_transform_type = self.config.reward_model.reward_kwargs.get(
+                        "harmony_transform_type", "photometric"
+                    )
+                    harmony_transform_gen_batch, harmony_transform_metadata = _build_harmony_transform_batch(
+                        gen_batch=gen_batch,
+                        source_batch=batch,
+                        transform_type=harmony_transform_type,
+                        global_step=self.global_steps,
+                    )
+                else:
+                    harmony_transform_gen_batch = None
+                    harmony_transform_metadata = None
+
                 is_last_step = self.global_steps >= self.total_training_steps
 
                 with _timer("step", timing_raw):
@@ -1073,6 +1269,12 @@ class RayPPOTrainer:
                             assert len(gen_batch_output) == len(batch) * self.n_votes_per_prompt
                         else:
                             pass
+                    if harmony_transform_gen_batch is not None:
+                        with _timer("gen_harmony_transform", timing_raw):
+                            harmony_transform_output = self.actor_rollout_wg.generate_sequences(harmony_transform_gen_batch)
+                            assert len(harmony_transform_output) == len(batch) * self.n_votes_per_prompt
+                    else:
+                        harmony_transform_output = None
                     if self.config.algorithm.adv_estimator == AdvantageEstimator.REMAX:
                         with _timer("gen_max", timing_raw):
                             gen_baseline_batch = deepcopy(gen_batch)
@@ -1095,6 +1297,17 @@ class RayPPOTrainer:
                     # repeat to align with repeated responses in rollout
                     batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
                     batch = batch.union(gen_batch_output)
+                    if harmony_transform_output is not None:
+                        batch.batch["harmony_transform_responses"] = harmony_transform_output.batch["responses"]
+                        batch.batch["harmony_transform_attention_mask"] = harmony_transform_output.batch["attention_mask"]
+                        batch.non_tensor_batch["harmony_transform_metadata"] = np.array(
+                            [
+                                deepcopy(metadata)
+                                for metadata in harmony_transform_metadata
+                                for _ in range(self.config.actor_rollout_ref.rollout.n)
+                            ],
+                            dtype=object,
+                        )
 
                     batch.batch["response_mask"] = compute_response_mask(batch)
                     # balance the number of valid tokens on each dp rank.
@@ -1151,7 +1364,6 @@ class RayPPOTrainer:
                             reward_tensor = reward_result["reward_tensor"]
                             reward_extra_infos_dict = reward_result["reward_extra_info"]
                             if self.use_ttrl:
-                                from copy import deepcopy
                                 ttrl_metrics = reward_result["ttrl_info"]
                                 for k, v in ttrl_metrics.items():
                                     metrics.update({f"train/{k}": v})

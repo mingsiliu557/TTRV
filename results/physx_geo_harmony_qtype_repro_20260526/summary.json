@@ -1,0 +1,134 @@
+{
+  "date_utc": "2026-05-26",
+  "dataset": "PhysX-MCQ full, split by question_type",
+  "model": "PointLLM_7B_v1.2 local cache",
+  "policy": "Geo-Harmony-QType",
+  "results": {
+    "object_category": {
+      "strategy": "weight_update",
+      "run": "outputs/20260525_geo_harmony_full_object_category_step4_seed13_lr5e10_hm0p60_r8_unk0_sensor_keep",
+      "baseline_step0_acc": 0.39510718632009234,
+      "best_step": 4,
+      "best_acc": 0.40300184104596376,
+      "delta_vs_fixed_step0": 0.00789465472587142,
+      "invalid_rate": 0.0168190470246825,
+      "hit_max_response_length_rate": 0.0391300277717103,
+      "notes": "Geo-Harmony reward, sensor_noise point reframe, rollout/votes=8, lr=5e-10, KL=0.3."
+    },
+    "joint_type": {
+      "strategy": "test_time_vote8_majority",
+      "run": "outputs/20260526_geo_harmony_full_joint_type_vote8_sensor_baseline_keep",
+      "fixed_step0_cache": "outputs/20260525_geo_harmony_full_joint_type_step4_seed13_lr5e10_hm0p60_r8_unk0_sensor/validation_predictions_step0.jsonl",
+      "baseline_step0_acc": 0.351392849309059,
+      "vote_rows": 72944,
+      "num_examples": 9118,
+      "vote_mean_acc": 0.3315145865321342,
+      "majority_acc": 0.36576003509541566,
+      "best_of_8_acc": 0.7138626891862251,
+      "delta_vs_fixed_step0": 0.014367185786356682,
+      "majority_invalid_rate": 0.007786795349857425,
+      "vote_invalid_rate": 0.019672625575784163,
+      "hit_max_response_length_rate": 0.0604573371353367,
+      "notes": "Weight-update Geo-Harmony collapsed on this type; vote8 majority is positive."
+    },
+    "movable_part": {
+      "strategy": "test_time_vote8_majority",
+      "run": "outputs/20260526_geo_harmony_full_movable_part_vote8_sensor_baseline_keep",
+      "fixed_step0_cache": "outputs/20260525_geo_harmony_full_movable_part_step1_seed13_lr1e9_hm0p75/validation_predictions_step0.jsonl",
+      "baseline_step0_acc": 0.2676098735701385,
+      "vote_rows": 26576,
+      "num_examples": 3322,
+      "vote_mean_acc": 0.26102498494882603,
+      "majority_acc": 0.27302829620710417,
+      "best_of_8_acc": 0.6968693558097532,
+      "delta_vs_fixed_step0": 0.005418422636965654,
+      "majority_invalid_rate": 0.038832028898254066,
+      "vote_invalid_rate": 0.062086092715231786,
+      "hit_max_response_length_rate": 0.11047561709813365,
+      "notes": "Positive but small gain; use as conservative test-time voting, not weight update."
+    }
+  },
+  "ttrl_reference": {
+    "run": "outputs/20260524_220158_physx_ttrl_valall_grid_detached/gate075_lr5e9_kl0p2_max24_valall_s3_bs64_stop2pt",
+    "step0_overall_acc": 0.3771888416840875,
+    "step1_overall_acc": 0.36516285656483916,
+    "step1_by_question_type": {
+      "object_category": 0.3829375604580772,
+      "joint_type": 0.3405352050888353,
+      "movable_part": 0.26128838049367853
+    },
+    "comparison": "Geo-Harmony-QType best results are above adapted TTRL step1 on all three question types.",
+    "original_run_dir_cleaned": true,
+    "archived_metrics": "summary.json"
+  },
+  "collapse_findings": [
+    "Joint and movable weight updates can increase pseudo reward while validation accuracy drops.",
+    "The failure mode matches the TTRL collapse described in arXiv 2603.08660: self-reward sharpens stable predictions; when stability is not correlated with correctness, stable wrong answers are reinforced.",
+    "For joint_type, training batches showed high reward on wrong pseudo labels, e.g. 7/8 agreement on an incorrect joint option, then validation dropped.",
+    "For these fragile types, test-time vote selection was safer than updating model weights."
+  ],
+  "early_stop_recommendations": [
+    "Always save and reuse fixed step0 validation JSONL per question_type via trainer.validation_step0_cache_jsonl.",
+    "Use TEST_FREQ=1 for tuning runs; validate every step and stop on accuracy_drop, best_accuracy_drop, invalid_rate_increase, or hit_max_response_length_increase.",
+    "For full vote8 runs, stream-prefix monitor after at least 1000 prompts; abort if majority accuracy is below fixed step0 by more than 0.005.",
+    "Monitor collapse indicators: high train/physx/ttrv_reward_mean with low train/physx/majority_acc@votes, rising hit_max_response_length_rate, or pseudo label concentration on one option.",
+    "Keep pseudo-label gates available: TTRL_MIN_MAJORITY_RATIO and TTRL_MAX_MAJORITY_RATIO. They reduce bad updates but did not fully solve joint_type collapse."
+  ],
+  "metric_definitions": {
+    "reported_best_acc": "For object_category, normal parsed-response accuracy after weight update. For joint_type and movable_part, majority_accuracy over 8 sampled responses per question (acc@8 majority vote).",
+    "top_level_accuracy": "Response-average accuracy over JSONL rows. In vote8 runs this averages all 8 sampled responses per question and is not the headline method output.",
+    "majority_accuracy": "Accuracy after grouping responses by question id and taking the majority parsed prediction. This is the reported acc@8 metric for vote8 runs.",
+    "pass_at_votes_or_best_accuracy_at_votes": "Oracle diagnostic: whether any sampled response in the vote set is correct. Not used as final method accuracy."
+  },
+  "step_history": [
+    {
+      "question_type": "object_category",
+      "run_type": "weight_update",
+      "step": 0,
+      "response_accuracy": 0.39510718632009234,
+      "majority_accuracy_at_8": 0.39510718632009234,
+      "note": "fixed baseline; one response per question"
+    },
+    {
+      "question_type": "object_category",
+      "run_type": "weight_update",
+      "step": 4,
+      "response_accuracy": 0.40300184104596376,
+      "majority_accuracy_at_8": 0.40300184104596376,
+      "note": "selected best; one response per question"
+    },
+    {
+      "question_type": "joint_type",
+      "run_type": "fixed_baseline",
+      "step": 0,
+      "response_accuracy": 0.351392849309059,
+      "majority_accuracy_at_8": 0.351392849309059,
+      "note": "single response fixed step0"
+    },
+    {
+      "question_type": "joint_type",
+      "run_type": "vote8_baseline",
+      "step": 0,
+      "response_accuracy": 0.3315145865321342,
+      "majority_accuracy_at_8": 0.36576003509541566,
+      "note": "selected majority-vote output"
+    },
+    {
+      "question_type": "movable_part",
+      "run_type": "fixed_baseline",
+      "step": 0,
+      "response_accuracy": 0.2676098735701385,
+      "majority_accuracy_at_8": 0.2676098735701385,
+      "note": "single response fixed step0"
+    },
+    {
+      "question_type": "movable_part",
+      "run_type": "vote8_baseline",
+      "step": 0,
+      "response_accuracy": 0.26102498494882603,
+      "majority_accuracy_at_8": 0.27302829620710417,
+      "note": "selected majority-vote output"
+    }
+  ],
+  "step_history_note": "Archived final object run has validation only at steps 0 and 4 because TEST_FREQ=4. Final joint/movable selected runs are RUN_MODE=baseline vote8 runs, so only step 0 exists. Earlier failed tuning logs were cleaned from outputs; fixed step0 caches and key metrics are archived under results/physx_geo_harmony_qtype_repro_20260526/."
+}

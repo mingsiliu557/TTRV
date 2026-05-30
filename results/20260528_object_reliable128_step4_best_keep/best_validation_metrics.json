@@ -1,0 +1,66 @@
+{
+  "selection_metric": "accuracy",
+  "best_step": 4,
+  "best": {
+    "step": 4,
+    "metrics_path": "/root/autodl-tmp/TTRV/outputs/physx_reliable128_soft_keep/runs/20260528_object_original_reliable128_diverse_text_geo_harmony_soft_r8_lr5e10_gamma2_32step_test4_b4_keep/val_metrics_step4.json",
+    "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_reliable128_soft_keep/runs/20260528_object_original_reliable128_diverse_text_geo_harmony_soft_r8_lr5e10_gamma2_32step_test4_b4_keep/validation_predictions_step4.jsonl",
+    "accuracy": 0.40390676194339564,
+    "num_evaluated": 32047,
+    "invalid_outputs": 498,
+    "majority_accuracy": 0.40390676194339564,
+    "pass_at_votes": 0.40390676194339564,
+    "best_accuracy_at_votes": 0.40390676194339564,
+    "worst_accuracy_at_votes": 0.40390676194339564,
+    "frequency_mean": 1.0,
+    "normalized_entropy_mean": 0.0,
+    "ttrv_reward_mean": 0.0
+  },
+  "steps": [
+    {
+      "step": 0,
+      "metrics_path": "/root/autodl-tmp/TTRV/outputs/physx_reliable128_soft_keep/runs/20260528_object_original_reliable128_diverse_text_geo_harmony_soft_r8_lr5e10_gamma2_32step_test4_b4_keep/val_metrics_step0.json",
+      "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_reliable128_soft_keep/runs/20260528_object_original_reliable128_diverse_text_geo_harmony_soft_r8_lr5e10_gamma2_32step_test4_b4_keep/validation_predictions_step0.jsonl",
+      "accuracy": 0.39510718632009234,
+      "num_evaluated": 32047,
+      "invalid_outputs": 514,
+      "majority_accuracy": 0.39510718632009234,
+      "pass_at_votes": 0.39510718632009234,
+      "best_accuracy_at_votes": 0.39510718632009234,
+      "worst_accuracy_at_votes": 0.39510718632009234,
+      "frequency_mean": 1.0,
+      "normalized_entropy_mean": 0.0,
+      "ttrv_reward_mean": 0.0
+    },
+    {
+      "step": 4,
+      "metrics_path": "/root/autodl-tmp/TTRV/outputs/physx_reliable128_soft_keep/runs/20260528_object_original_reliable128_diverse_text_geo_harmony_soft_r8_lr5e10_gamma2_32step_test4_b4_keep/val_metrics_step4.json",
+      "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_reliable128_soft_keep/runs/20260528_object_original_reliable128_diverse_text_geo_harmony_soft_r8_lr5e10_gamma2_32step_test4_b4_keep/validation_predictions_step4.jsonl",
+      "accuracy": 0.40390676194339564,
+      "num_evaluated": 32047,
+      "invalid_outputs": 498,
+      "majority_accuracy": 0.40390676194339564,
+      "pass_at_votes": 0.40390676194339564,
+      "best_accuracy_at_votes": 0.40390676194339564,
+      "worst_accuracy_at_votes": 0.40390676194339564,
+      "frequency_mean": 1.0,
+      "normalized_entropy_mean": 0.0,
+      "ttrv_reward_mean": 0.0
+    },
+    {
+      "step": 8,
+      "metrics_path": "/root/autodl-tmp/TTRV/outputs/physx_reliable128_soft_keep/runs/20260528_object_original_reliable128_diverse_text_geo_harmony_soft_r8_lr5e10_gamma2_32step_test4_b4_keep/val_metrics_step8.json",
+      "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_reliable128_soft_keep/runs/20260528_object_original_reliable128_diverse_text_geo_harmony_soft_r8_lr5e10_gamma2_32step_test4_b4_keep/validation_predictions_step8.jsonl",
+      "accuracy": 0.24451586731987393,
+      "num_evaluated": 32047,
+      "invalid_outputs": 599,
+      "majority_accuracy": 0.24451586731987393,
+      "pass_at_votes": 0.24451586731987393,
+      "best_accuracy_at_votes": 0.24451586731987393,
+      "worst_accuracy_at_votes": 0.24451586731987393,
+      "frequency_mean": 1.0,
+      "normalized_entropy_mean": 0.0,
+      "ttrv_reward_mean": 0.0
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "num_evaluated": 32,
+  "num_correct": 12,
+  "accuracy": 0.375,
+  "invalid_outputs": 0,
+  "hit_max_response_length_outputs": 4,
+  "hit_max_response_length_rate": 0.125,
+  "response_token_len_mean": 17.5,
+  "response_token_len_max": 24.0,
+  "prediction_distribution": {
+    "A": 4,
+    "B": 7,
+    "C": 10,
+    "D": 11
+  },
+  "ttrl_pseudo_label_distribution": {
+    "B": 8,
+    "D": 8,
+    "none": 16
+  },
+  "accuracy_by_question_type": {
+    "joint_type": {
+      "num_evaluated": 32,
+      "num_correct": 12,
+      "invalid_outputs": 0,
+      "accuracy": 0.375
+    }
+  },
+  "ttrv_metrics": {
+    "num_groups": 4,
+    "mean_votes_per_group": 8.0,
+    "response_accuracy": 0.375,
+    "acc_at_1": null,
+    "majority_accuracy": 0.5,
+    "pass_at_votes": 1.0,
+    "best_accuracy_at_votes": 1.0,
+    "worst_accuracy_at_votes": 0.0,
+    "vote_invalid_rate": 0.0,
+    "group_invalid_rate": 0.0,
+    "frequency_mean": 0.421875,
+    "normalized_entropy_mean": 0.8809705936965959,
+    "raw_entropy_mean": 0.9969586053433314,
+    "ttrv_reward_mean": 0.3125,
+    "reward_mean": 0.3125,
+    "unique_pred_ratio_mean": 0.40625,
+    "group_unknown_rate_mean": 0.0,
+    "ttrl_majority_count_mean": 2.5,
+    "ttrl_majority_ratio_mean": 0.3125,
+    "ttrl_majority_tie_mean": 0.0,
+    "ttrl_max_majority_ratio_mean": 1.0,
+    "geo_harmony_hm_mean": 0.518751082499843,
+    "geo_original_majority_ratio_mean": 0.0,
+    "geo_original_majority_tie_mean": 0.0,
+    "geo_view_support_mean": 1.0,
+    "geo_skipped_rate": 0.0
+  },
+  "ttrv_metrics_by_question_type": {
+    "joint_type": {
+      "num_groups": 4,
+      "mean_votes_per_group": 8.0,
+      "response_accuracy": 0.375,
+      "acc_at_1": null,
+      "majority_accuracy": 0.5,
+      "pass_at_votes": 1.0,
+      "best_accuracy_at_votes": 1.0,
+      "worst_accuracy_at_votes": 0.0,
+      "invalid_rate": 0.0
+    }
+  },
+  "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_geo_harmony_combined_sensor_r8_lr5e10_4step_cache/training_predictions_step1.jsonl"
+}

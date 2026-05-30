@@ -1,0 +1,72 @@
+{
+  "num_evaluated": 26576,
+  "num_correct": 6937,
+  "accuracy": 0.26102498494882603,
+  "invalid_outputs": 1650,
+  "hit_max_response_length_outputs": 2936,
+  "hit_max_response_length_rate": 0.11047561709813365,
+  "response_token_len_mean": 13.114990969295604,
+  "response_token_len_max": 24.0,
+  "prediction_distribution": {
+    "A": 12128,
+    "B": 5745,
+    "C": 3058,
+    "D": 3995,
+    "unknown": 1650
+  },
+  "ttrl_pseudo_label_distribution": {
+    "A": 9704,
+    "B": 2120,
+    "C": 672,
+    "D": 1128,
+    "none": 12952
+  },
+  "accuracy_by_question_type": {
+    "movable_part": {
+      "num_evaluated": 26576,
+      "num_correct": 6937,
+      "invalid_outputs": 1650,
+      "accuracy": 0.26102498494882603
+    }
+  },
+  "ttrv_metrics": {
+    "num_groups": 3322,
+    "mean_votes_per_group": 8.0,
+    "response_accuracy": 0.26102498494882603,
+    "acc_at_1": null,
+    "majority_accuracy": 0.27302829620710417,
+    "pass_at_votes": 0.6968693558097532,
+    "best_accuracy_at_votes": 0.6968693558097532,
+    "worst_accuracy_at_votes": 0.024081878386514148,
+    "vote_invalid_rate": 0.062086092715231786,
+    "group_invalid_rate": 0.062086092715231786,
+    "frequency_mean": 0.5169984196267309,
+    "normalized_entropy_mean": 0.7552360085887496,
+    "raw_entropy_mean": 0.8387664845114807,
+    "ttrv_reward_mean": 0.40069987959060804,
+    "reward_mean": 0.26102498494882603,
+    "unique_pred_ratio_mean": 0.36322245635159545,
+    "group_unknown_rate_mean": 0.0,
+    "ttrl_majority_count_mean": 3.2055990367248643,
+    "ttrl_majority_ratio_mean": 0.40069987959060804,
+    "ttrl_majority_tie_mean": 0.0,
+    "ttrl_max_majority_ratio_mean": 1.0,
+    "geo_harmony_hm_mean": 0.5651281861681412,
+    "geo_view_support_mean": 1.0252859723058398,
+    "geo_skipped_rate": 0.0
+  },
+  "ttrv_metrics_by_question_type": {
+    "movable_part": {
+      "num_groups": 3322,
+      "mean_votes_per_group": 8.0,
+      "response_accuracy": 0.26102498494882603,
+      "acc_at_1": null,
+      "majority_accuracy": 0.27302829620710417,
+      "pass_at_votes": 0.6968693558097532,
+      "best_accuracy_at_votes": 0.6968693558097532,
+      "worst_accuracy_at_votes": 0.024081878386514148,
+      "invalid_rate": 0.062086092715231786
+    }
+  },
+  "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/20260526_geo_harmony_full_movable_part_vote8_sensor_baseline_keep/validation_predictions_step0.jsonl"
+}

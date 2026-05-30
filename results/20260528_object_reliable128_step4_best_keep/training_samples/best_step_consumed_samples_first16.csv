@@ -1,0 +1,17 @@
+pos,id,question_type,answer,prediction,response_token_len,prediction_raw,object_id,answer_text,correct_option_text,dataset_index
+0,physxnet_mcq_00015393,object_category,A,A,2,A,12008,,Backpack,15392
+1,physxnet_mcq_00014218,object_category,B,B,2,B,11152,,Over-Ear Headphones,14217
+2,physxnet_mcq_00013559,object_category,C,C,2,C,10585,,Wired Over-Ear Headphones,13558
+3,physxnet_mcq_00021292,object_category,D,D,2,D,17022,,Pendant Lamp,21291
+4,physxnet_mcq_00016773,object_category,A,A,2,A,13265,,Bunk Bed with Stairs,16772
+5,physxnet_mcq_00016674,object_category,B,B,5,B. Baseball Cap,13172,,Baseball Cap,16673
+6,physxnet_mcq_00019423,object_category,C,C,2,C,15432,,Table Lamp,19422
+7,physxnet_mcq_00022896,object_category,D,D,2,D,19284,,Table,22895
+8,physxnet_mcq_00023117,object_category,A,A,2,A,19570,,Office Table,23116
+9,physxnet_mcq_00007386,object_category,B,B,6,B. Computer Monitor,5458,,Computer Monitor,7385
+10,physxnet_mcq_00002247,object_category,C,C,2,C,1801,,Water Faucet,2246
+11,physxnet_mcq_00023004,object_category,D,D,2,D,19414,,Round Table,23003
+12,physxnet_mcq_00023669,object_category,A,A,2,A,20354,,Extendable Glass Table,23668
+13,physxnet_mcq_00037150,object_category,B,B,8,B. Swivel Armchair,40964,,Swivel Armchair,37149
+14,physxnet_mcq_00024371,object_category,C,C,2,C,21402,,Coffee Table,24370
+15,physxnet_mcq_00023204,object_category,D,D,2,D,19691,,Dining Table,23203

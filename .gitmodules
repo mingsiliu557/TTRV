@@ -1,0 +1,3 @@
+[submodule "SQA3D"]
+	path = SQA3D
+	url = https://github.com/SilongYong/SQA3D.git

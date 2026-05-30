@@ -1,0 +1,234 @@
+{
+  "created_at": "2026-05-26",
+  "dataset": "physx_cleaned_options_v1 combined validation",
+  "step0_cache": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/fixed_step0_caches/combined_validation_predictions_step0.jsonl",
+  "runs": {
+    "geo_harmony": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_geo_harmony_combined_sensor_r8_lr5e10_4step_cache",
+    "ttrl_majority": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_ttrl_majority_combined_r8_lr5e10_4step_cache"
+  },
+  "rows": [
+    {
+      "method": "static_step0_cache",
+      "step": 0,
+      "num_evaluated": 10572,
+      "accuracy": 0.3976541808550889,
+      "joint_type_accuracy": 0.4190611976310594,
+      "movable_part_accuracy": 0.26341127922971114,
+      "invalid_rate": 0.010877790389708665,
+      "hit_max_response_length_rate": 0.09998108210367007,
+      "prediction_distribution": {
+        "A": 1925,
+        "B": 2058,
+        "C": 2362,
+        "D": 4112,
+        "unknown": 115
+      },
+      "early_stop_triggered": false,
+      "early_stop_reason": null,
+      "recovery_restored": null,
+      "restored_from_step": null,
+      "metrics_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/fixed_step0_caches/combined_metrics_step0.json",
+      "predictions_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/fixed_step0_caches/combined_validation_predictions_step0.jsonl",
+      "delta_accuracy_vs_step0": 0.0,
+      "delta_joint_type_vs_step0": 0.0,
+      "delta_movable_part_vs_step0": 0.0
+    },
+    {
+      "method": "geo_harmony",
+      "step": 1,
+      "num_evaluated": 10572,
+      "accuracy": 0.3898032538781687,
+      "joint_type_accuracy": 0.4101776705417855,
+      "movable_part_accuracy": 0.2620357634112792,
+      "invalid_rate": 0.010121074536511539,
+      "hit_max_response_length_rate": 0.10442678774120318,
+      "prediction_distribution": {
+        "A": 1888,
+        "B": 1983,
+        "C": 2308,
+        "D": 4286,
+        "unknown": 107
+      },
+      "early_stop_triggered": true,
+      "early_stop_reason": "accuracy_drop",
+      "recovery_restored": true,
+      "restored_from_step": 0,
+      "metrics_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_geo_harmony_combined_sensor_r8_lr5e10_4step_cache/val_metrics_step1.json",
+      "predictions_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_geo_harmony_combined_sensor_r8_lr5e10_4step_cache/validation_predictions_step1.jsonl",
+      "delta_accuracy_vs_step0": -0.007850926976920192,
+      "delta_joint_type_vs_step0": -0.008883527089273924,
+      "delta_movable_part_vs_step0": -0.0013755158184319272
+    },
+    {
+      "method": "ttrl_majority",
+      "step": 1,
+      "num_evaluated": 10572,
+      "accuracy": 0.386587211502081,
+      "joint_type_accuracy": 0.4063391094538276,
+      "movable_part_accuracy": 0.2627235213204952,
+      "invalid_rate": 0.0100264850548619,
+      "hit_max_response_length_rate": 0.1021566401816118,
+      "prediction_distribution": {
+        "A": 1875,
+        "B": 1987,
+        "C": 2302,
+        "D": 4302,
+        "unknown": 106
+      },
+      "early_stop_triggered": true,
+      "early_stop_reason": "accuracy_drop",
+      "recovery_restored": true,
+      "restored_from_step": 0,
+      "metrics_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_ttrl_majority_combined_r8_lr5e10_4step_cache/val_metrics_step1.json",
+      "predictions_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_ttrl_majority_combined_r8_lr5e10_4step_cache/validation_predictions_step1.jsonl",
+      "delta_accuracy_vs_step0": -0.011066969353007938,
+      "delta_joint_type_vs_step0": -0.012722088177231805,
+      "delta_movable_part_vs_step0": -0.0006877579092159358
+    }
+  ],
+  "train_step1_metrics": {
+    "geo_harmony": {
+      "num_evaluated": 32,
+      "num_correct": 12,
+      "accuracy": 0.375,
+      "invalid_outputs": 0,
+      "hit_max_response_length_outputs": 4,
+      "hit_max_response_length_rate": 0.125,
+      "response_token_len_mean": 17.5,
+      "response_token_len_max": 24.0,
+      "prediction_distribution": {
+        "A": 4,
+        "B": 7,
+        "C": 10,
+        "D": 11
+      },
+      "ttrl_pseudo_label_distribution": {
+        "B": 8,
+        "D": 8,
+        "none": 16
+      },
+      "accuracy_by_question_type": {
+        "joint_type": {
+          "num_evaluated": 32,
+          "num_correct": 12,
+          "invalid_outputs": 0,
+          "accuracy": 0.375
+        }
+      },
+      "ttrv_metrics": {
+        "num_groups": 4,
+        "mean_votes_per_group": 8.0,
+        "response_accuracy": 0.375,
+        "acc_at_1": null,
+        "majority_accuracy": 0.5,
+        "pass_at_votes": 1.0,
+        "best_accuracy_at_votes": 1.0,
+        "worst_accuracy_at_votes": 0.0,
+        "vote_invalid_rate": 0.0,
+        "group_invalid_rate": 0.0,
+        "frequency_mean": 0.421875,
+        "normalized_entropy_mean": 0.8809705936965959,
+        "raw_entropy_mean": 0.9969586053433314,
+        "ttrv_reward_mean": 0.3125,
+        "reward_mean": 0.3125,
+        "unique_pred_ratio_mean": 0.40625,
+        "group_unknown_rate_mean": 0.0,
+        "ttrl_majority_count_mean": 2.5,
+        "ttrl_majority_ratio_mean": 0.3125,
+        "ttrl_majority_tie_mean": 0.0,
+        "ttrl_max_majority_ratio_mean": 1.0,
+        "geo_harmony_hm_mean": 0.518751082499843,
+        "geo_original_majority_ratio_mean": 0.0,
+        "geo_original_majority_tie_mean": 0.0,
+        "geo_view_support_mean": 1.0,
+        "geo_skipped_rate": 0.0
+      },
+      "ttrv_metrics_by_question_type": {
+        "joint_type": {
+          "num_groups": 4,
+          "mean_votes_per_group": 8.0,
+          "response_accuracy": 0.375,
+          "acc_at_1": null,
+          "majority_accuracy": 0.5,
+          "pass_at_votes": 1.0,
+          "best_accuracy_at_votes": 1.0,
+          "worst_accuracy_at_votes": 0.0,
+          "invalid_rate": 0.0
+        }
+      },
+      "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_geo_harmony_combined_sensor_r8_lr5e10_4step_cache/training_predictions_step1.jsonl"
+    },
+    "ttrl_majority": {
+      "num_evaluated": 32,
+      "num_correct": 13,
+      "accuracy": 0.40625,
+      "invalid_outputs": 0,
+      "hit_max_response_length_outputs": 5,
+      "hit_max_response_length_rate": 0.15625,
+      "response_token_len_mean": 19.5,
+      "response_token_len_max": 24.0,
+      "prediction_distribution": {
+        "A": 5,
+        "B": 10,
+        "C": 8,
+        "D": 9
+      },
+      "ttrl_pseudo_label_distribution": {
+        "B": 8,
+        "C": 8,
+        "none": 16
+      },
+      "accuracy_by_question_type": {
+        "joint_type": {
+          "num_evaluated": 32,
+          "num_correct": 13,
+          "invalid_outputs": 0,
+          "accuracy": 0.40625
+        }
+      },
+      "ttrv_metrics": {
+        "num_groups": 4,
+        "mean_votes_per_group": 8.0,
+        "response_accuracy": 0.40625,
+        "acc_at_1": null,
+        "majority_accuracy": 0.25,
+        "pass_at_votes": 1.0,
+        "best_accuracy_at_votes": 1.0,
+        "worst_accuracy_at_votes": 0.0,
+        "vote_invalid_rate": 0.0,
+        "group_invalid_rate": 0.0,
+        "frequency_mean": 0.4765625,
+        "normalized_entropy_mean": 0.8134271749030607,
+        "raw_entropy_mean": 0.9036760169326238,
+        "ttrv_reward_mean": 0.375,
+        "reward_mean": 0.375,
+        "unique_pred_ratio_mean": 0.375,
+        "group_unknown_rate_mean": 0.0,
+        "ttrl_majority_count_mean": 4.5,
+        "ttrl_majority_ratio_mean": 0.5625,
+        "ttrl_majority_tie_mean": 0.5,
+        "ttrl_max_majority_ratio_mean": 1.0,
+        "geo_harmony_hm_mean": 0.0,
+        "geo_original_majority_ratio_mean": 0.0,
+        "geo_original_majority_tie_mean": 0.0,
+        "geo_view_support_mean": 0.0,
+        "geo_skipped_rate": 0.0
+      },
+      "ttrv_metrics_by_question_type": {
+        "joint_type": {
+          "num_groups": 4,
+          "mean_votes_per_group": 8.0,
+          "response_accuracy": 0.40625,
+          "acc_at_1": null,
+          "majority_accuracy": 0.25,
+          "pass_at_votes": 1.0,
+          "best_accuracy_at_votes": 1.0,
+          "worst_accuracy_at_votes": 0.0,
+          "invalid_rate": 0.0
+        }
+      },
+      "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_ttrl_majority_combined_r8_lr5e10_4step_cache/training_predictions_step1.jsonl"
+    }
+  },
+  "conclusion": "Both Geo-Harmony and TTRL majority under the tested update settings dropped validation accuracy at step 1; early stop selected static step0 as best and recovery restored step0 checkpoints."
+}

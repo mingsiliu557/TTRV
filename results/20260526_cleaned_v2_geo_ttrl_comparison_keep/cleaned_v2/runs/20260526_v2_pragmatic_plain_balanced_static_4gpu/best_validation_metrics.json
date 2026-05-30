@@ -1,0 +1,36 @@
+{
+  "selection_metric": "accuracy",
+  "best_step": 0,
+  "best": {
+    "step": 0,
+    "metrics_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/runs/20260526_v2_pragmatic_plain_balanced_static_4gpu/val_metrics_step0.json",
+    "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/runs/20260526_v2_pragmatic_plain_balanced_static_4gpu/validation_predictions_step0.jsonl",
+    "accuracy": 0.4808129109384339,
+    "num_evaluated": 8365,
+    "invalid_outputs": 675,
+    "majority_accuracy": 0.4808129109384339,
+    "pass_at_votes": 0.4808129109384339,
+    "best_accuracy_at_votes": 0.4808129109384339,
+    "worst_accuracy_at_votes": 0.4808129109384339,
+    "frequency_mean": 1.0,
+    "normalized_entropy_mean": 0.0,
+    "ttrv_reward_mean": 0.8386132695756127
+  },
+  "steps": [
+    {
+      "step": 0,
+      "metrics_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/runs/20260526_v2_pragmatic_plain_balanced_static_4gpu/val_metrics_step0.json",
+      "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/runs/20260526_v2_pragmatic_plain_balanced_static_4gpu/validation_predictions_step0.jsonl",
+      "accuracy": 0.4808129109384339,
+      "num_evaluated": 8365,
+      "invalid_outputs": 675,
+      "majority_accuracy": 0.4808129109384339,
+      "pass_at_votes": 0.4808129109384339,
+      "best_accuracy_at_votes": 0.4808129109384339,
+      "worst_accuracy_at_votes": 0.4808129109384339,
+      "frequency_mean": 1.0,
+      "normalized_entropy_mean": 0.0,
+      "ttrv_reward_mean": 0.8386132695756127
+    }
+  ]
+}

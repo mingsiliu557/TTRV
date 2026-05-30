@@ -1,0 +1,23 @@
+# Local large data and checkpoint artifacts.
+# Some small benchmark JSON files under verl/data are already tracked upstream;
+# this file prevents newly created datasets/checkpoints from being added.
+/data/
+**/checkpoints/
+**/outputs/
+
+# Model/checkpoint/binary dataset payloads.
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.dat
+*.zip
+*.tar
+*.tar.gz
+
+# Local caches and generated Python artifacts.
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.cache/

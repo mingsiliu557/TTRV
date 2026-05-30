@@ -1,0 +1,254 @@
+{
+  "run_dir": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates_keep/runs/20260528_v2_oracle_semantic_correct20_first_geo_harmony_soft_sensor_r8_lr5e10_gamma2_5step_b4_keep",
+  "result_dir": "/root/autodl-tmp/TTRV/results/20260528_v2_soft_label_geo_harmony_keep",
+  "code_changed": "verl/verl/utils/reward_score/physx_mcq_ttrv.py",
+  "validation": [
+    {
+      "step": 0,
+      "n": 8365,
+      "acc": 0.5005379557680812,
+      "invalid": 0.015780035863717873,
+      "hitmax": 0.05762104004781829,
+      "qtype": {
+        "joint_type": {
+          "n": 7669,
+          "acc": 0.5223627591602555,
+          "invalid": 0.016299387143043423,
+          "hitmax": 0.05854739861781197
+        },
+        "movable_part": {
+          "n": 696,
+          "acc": 0.2600574712643678,
+          "invalid": 0.010057471264367816,
+          "hitmax": 0.04741379310344827
+        }
+      }
+    },
+    {
+      "step": 1,
+      "n": 8365,
+      "acc": 0.5035265989240885,
+      "invalid": 0.01470412432755529,
+      "hitmax": 0.058338314405260015,
+      "qtype": {
+        "joint_type": {
+          "n": 7669,
+          "acc": 0.5258834267831529,
+          "invalid": 0.014604250880166906,
+          "hitmax": 0.059329769200678055
+        },
+        "movable_part": {
+          "n": 696,
+          "acc": 0.257183908045977,
+          "invalid": 0.015804597701149427,
+          "hitmax": 0.04741379310344827
+        }
+      }
+    },
+    {
+      "step": 2,
+      "n": 8365,
+      "acc": 0.502928870292887,
+      "invalid": 0.012074118350268977,
+      "hitmax": 0.05762104004781829,
+      "qtype": {
+        "joint_type": {
+          "n": 7669,
+          "acc": 0.5247098709088538,
+          "invalid": 0.012387534228713,
+          "hitmax": 0.05906897900638936
+        },
+        "movable_part": {
+          "n": 696,
+          "acc": 0.2629310344827586,
+          "invalid": 0.008620689655172414,
+          "hitmax": 0.041666666666666664
+        }
+      }
+    },
+    {
+      "step": 3,
+      "n": 8365,
+      "acc": 0.5101016138673042,
+      "invalid": 0.012313209802749551,
+      "hitmax": 0.04973102211595935,
+      "qtype": {
+        "joint_type": {
+          "n": 7669,
+          "acc": 0.532663971834659,
+          "invalid": 0.012257139131568654,
+          "hitmax": 0.05020211240057374
+        },
+        "movable_part": {
+          "n": 696,
+          "acc": 0.2614942528735632,
+          "invalid": 0.01293103448275862,
+          "hitmax": 0.04454022988505747
+        }
+      }
+    },
+    {
+      "step": 4,
+      "n": 8365,
+      "acc": 0.5055588762701734,
+      "invalid": 0.01159593544530783,
+      "hitmax": 0.04805738194859534,
+      "qtype": {
+        "joint_type": {
+          "n": 7669,
+          "acc": 0.5282305385317512,
+          "invalid": 0.011735558742991264,
+          "hitmax": 0.04915895162341896
+        },
+        "movable_part": {
+          "n": 696,
+          "acc": 0.2557471264367816,
+          "invalid": 0.010057471264367816,
+          "hitmax": 0.035919540229885055
+        }
+      }
+    }
+  ],
+  "training": [
+    {
+      "step": 1,
+      "groups": 4,
+      "response_acc": 0.5,
+      "pass_at_8": 1.0,
+      "majority_at_8": 0.25,
+      "soft_selected_rate": 0.25,
+      "soft_gt_mass_mean": 0.7150000767998351,
+      "reward_mean": 0.21875,
+      "by_q": {
+        "joint_type": {
+          "response_acc": 0.5625,
+          "pass_at_8": 1.0,
+          "majority_at_8": 0.5
+        },
+        "movable_part": {
+          "response_acc": 0.4375,
+          "pass_at_8": 1.0,
+          "majority_at_8": 0.0
+        }
+      }
+    },
+    {
+      "step": 2,
+      "groups": 4,
+      "response_acc": 0.5625,
+      "pass_at_8": 1.0,
+      "majority_at_8": 0.75,
+      "soft_selected_rate": 0.25,
+      "soft_gt_mass_mean": 0.6456377991264861,
+      "reward_mean": 0.25,
+      "by_q": {
+        "joint_type": {
+          "response_acc": 0.4375,
+          "pass_at_8": 1.0,
+          "majority_at_8": 0.5
+        },
+        "movable_part": {
+          "response_acc": 0.6875,
+          "pass_at_8": 1.0,
+          "majority_at_8": 1.0
+        }
+      }
+    },
+    {
+      "step": 3,
+      "groups": 4,
+      "response_acc": 0.53125,
+      "pass_at_8": 1.0,
+      "majority_at_8": 0.75,
+      "soft_selected_rate": 0.75,
+      "soft_gt_mass_mean": 0.6360943896928131,
+      "reward_mean": 0.5035132064704929,
+      "by_q": {
+        "joint_type": {
+          "response_acc": 0.5,
+          "pass_at_8": 1.0,
+          "majority_at_8": 0.5
+        },
+        "movable_part": {
+          "response_acc": 0.5625,
+          "pass_at_8": 1.0,
+          "majority_at_8": 1.0
+        }
+      }
+    },
+    {
+      "step": 4,
+      "groups": 4,
+      "response_acc": 0.53125,
+      "pass_at_8": 1.0,
+      "majority_at_8": 0.75,
+      "soft_selected_rate": 0.75,
+      "soft_gt_mass_mean": 0.6349998032002289,
+      "reward_mean": 0.549999940000032,
+      "by_q": {
+        "joint_type": {
+          "response_acc": 0.4375,
+          "pass_at_8": 1.0,
+          "majority_at_8": 0.5
+        },
+        "movable_part": {
+          "response_acc": 0.625,
+          "pass_at_8": 1.0,
+          "majority_at_8": 1.0
+        }
+      }
+    }
+  ],
+  "best": {
+    "step": 3,
+    "n": 8365,
+    "acc": 0.5101016138673042,
+    "invalid": 0.012313209802749551,
+    "hitmax": 0.04973102211595935,
+    "qtype": {
+      "joint_type": {
+        "n": 7669,
+        "acc": 0.532663971834659,
+        "invalid": 0.012257139131568654,
+        "hitmax": 0.05020211240057374
+      },
+      "movable_part": {
+        "n": 696,
+        "acc": 0.2614942528735632,
+        "invalid": 0.01293103448275862,
+        "hitmax": 0.04454022988505747
+      }
+    }
+  },
+  "baseline": {
+    "step": 0,
+    "n": 8365,
+    "acc": 0.5005379557680812,
+    "invalid": 0.015780035863717873,
+    "hitmax": 0.05762104004781829,
+    "qtype": {
+      "joint_type": {
+        "n": 7669,
+        "acc": 0.5223627591602555,
+        "invalid": 0.016299387143043423,
+        "hitmax": 0.05854739861781197
+      },
+      "movable_part": {
+        "n": 696,
+        "acc": 0.2600574712643678,
+        "invalid": 0.010057471264367816,
+        "hitmax": 0.04741379310344827
+      }
+    }
+  },
+  "hard_best_reference": {
+    "step": 3,
+    "acc": 0.507112970711297,
+    "joint_acc": 0.5297952796974834,
+    "movable_acc": 0.257183908045977
+  },
+  "paper_alignment": {
+    "paper_url": "https://arxiv.org/abs/2510.02172",
+    "claim": "Consistent with RESTRAIN pseudo-label weighting, but missing full negative self-penalization and offline prompt weighting."
+  }
+}

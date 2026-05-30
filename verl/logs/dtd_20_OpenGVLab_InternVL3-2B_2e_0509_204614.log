@@ -1,0 +1,564 @@
+2026-05-09 20:46:25,620	WARNING utils.py:461 -- Detecting docker specified CPUs. In previous versions of Ray, CPU detection in containers was incorrect. Please ensure that Ray has enough CPUs allocated. As a temporary workaround to revert to the prior behavior, set `RAY_USE_MULTIPROCESSING_CPU_COUNT=1` as an env var before starting Ray. Set the env var: `RAY_DISABLE_DOCKER_CPU_WARNING=1` to mute this warning.
+2026-05-09 20:46:28,997	INFO worker.py:2003 -- Started a local Ray instance. View the dashboard at [1m[32m127.0.0.1:8265 [39m[22m
+/root/miniconda3/envs/ttrv/lib/python3.10/site-packages/ray/_private/worker.py:2051: FutureWarning: Tip: In future versions of Ray, Ray will no longer override accelerator visible devices env var if num_gpus=0 or num_gpus=None (default). To enable this behavior and turn off this error message, set RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
+  warnings.warn(
+[36m(TaskRunner pid=13575)[0m {'actor_rollout_ref': {'actor': {'checkpoint': {'contents': ['model',
+[36m(TaskRunner pid=13575)[0m                                                              'optimizer',
+[36m(TaskRunner pid=13575)[0m                                                              'extra']},
+[36m(TaskRunner pid=13575)[0m                                  'clip_ratio': 0.2,
+[36m(TaskRunner pid=13575)[0m                                  'clip_ratio_c': 3.0,
+[36m(TaskRunner pid=13575)[0m                                  'clip_ratio_high': 0.2,
+[36m(TaskRunner pid=13575)[0m                                  'clip_ratio_low': 0.2,
+[36m(TaskRunner pid=13575)[0m                                  'entropy_coeff': 0,
+[36m(TaskRunner pid=13575)[0m                                  'fsdp_config': {'fsdp_size': -1,
+[36m(TaskRunner pid=13575)[0m                                                  'optimizer_offload': False,
+[36m(TaskRunner pid=13575)[0m                                                  'param_offload': False,
+[36m(TaskRunner pid=13575)[0m                                                  'wrap_policy': {'min_num_params': 0}},
+[36m(TaskRunner pid=13575)[0m                                  'grad_clip': 1.0,
+[36m(TaskRunner pid=13575)[0m                                  'kl_loss_coef': 0.001,
+[36m(TaskRunner pid=13575)[0m                                  'kl_loss_type': 'low_var_kl',
+[36m(TaskRunner pid=13575)[0m                                  'loss_agg_mode': 'token-mean',
+[36m(TaskRunner pid=13575)[0m                                  'optim': {'lr': 5e-07,
+[36m(TaskRunner pid=13575)[0m                                            'lr_warmup_steps': -1,
+[36m(TaskRunner pid=13575)[0m                                            'lr_warmup_steps_ratio': 0.03,
+[36m(TaskRunner pid=13575)[0m                                            'min_lr_ratio': None,
+[36m(TaskRunner pid=13575)[0m                                            'total_training_steps': -1,
+[36m(TaskRunner pid=13575)[0m                                            'warmup_style': 'cosine',
+[36m(TaskRunner pid=13575)[0m                                            'weight_decay': 0.01},
+[36m(TaskRunner pid=13575)[0m                                  'ppo_epochs': 1,
+[36m(TaskRunner pid=13575)[0m                                  'ppo_max_token_len_per_gpu': 8548,
+[36m(TaskRunner pid=13575)[0m                                  'ppo_micro_batch_size': None,
+[36m(TaskRunner pid=13575)[0m                                  'ppo_micro_batch_size_per_gpu': 2,
+[36m(TaskRunner pid=13575)[0m                                  'ppo_mini_batch_size': 1,
+[36m(TaskRunner pid=13575)[0m                                  'shuffle': False,
+[36m(TaskRunner pid=13575)[0m                                  'strategy': 'fsdp',
+[36m(TaskRunner pid=13575)[0m                                  'ulysses_sequence_parallel_size': 1,
+[36m(TaskRunner pid=13575)[0m                                  'use_dynamic_bsz': False,
+[36m(TaskRunner pid=13575)[0m                                  'use_kl_loss': True,
+[36m(TaskRunner pid=13575)[0m                                  'use_torch_compile': True},
+[36m(TaskRunner pid=13575)[0m                        'hybrid_engine': True,
+[36m(TaskRunner pid=13575)[0m                        'model': {'enable_gradient_checkpointing': True,
+[36m(TaskRunner pid=13575)[0m                                  'external_lib': None,
+[36m(TaskRunner pid=13575)[0m                                  'override_config': {},
+[36m(TaskRunner pid=13575)[0m                                  'path': 'OpenGVLab/InternVL3-2B',
+[36m(TaskRunner pid=13575)[0m                                  'use_liger': False,
+[36m(TaskRunner pid=13575)[0m                                  'use_remove_padding': True},
+[36m(TaskRunner pid=13575)[0m                        'ref': {'fsdp_config': {'param_offload': True,
+[36m(TaskRunner pid=13575)[0m                                                'wrap_policy': {'min_num_params': 0}},
+[36m(TaskRunner pid=13575)[0m                                'log_prob_max_token_len_per_gpu': 8548,
+[36m(TaskRunner pid=13575)[0m                                'log_prob_micro_batch_size': None,
+[36m(TaskRunner pid=13575)[0m                                'log_prob_micro_batch_size_per_gpu': 2,
+[36m(TaskRunner pid=13575)[0m                                'log_prob_use_dynamic_bsz': False,
+[36m(TaskRunner pid=13575)[0m                                'strategy': 'fsdp',
+[36m(TaskRunner pid=13575)[0m                                'ulysses_sequence_parallel_size': 1},
+[36m(TaskRunner pid=13575)[0m                        'rollout': {'disable_log_stats': True,
+[36m(TaskRunner pid=13575)[0m                                    'do_sample': True,
+[36m(TaskRunner pid=13575)[0m                                    'do_vote': True,
+[36m(TaskRunner pid=13575)[0m                                    'dtype': 'bfloat16',
+[36m(TaskRunner pid=13575)[0m                                    'enable_chunked_prefill': True,
+[36m(TaskRunner pid=13575)[0m                                    'enforce_eager': False,
+[36m(TaskRunner pid=13575)[0m                                    'engine_kwargs': {'swap_space': None},
+[36m(TaskRunner pid=13575)[0m                                    'free_cache_engine': False,
+[36m(TaskRunner pid=13575)[0m                                    'gpu_memory_utilization': 0.65,
+[36m(TaskRunner pid=13575)[0m                                    'ignore_eos': False,
+[36m(TaskRunner pid=13575)[0m                                    'load_format': 'dummy_dtensor',
+[36m(TaskRunner pid=13575)[0m                                    'log_prob_max_token_len_per_gpu': 8548,
+[36m(TaskRunner pid=13575)[0m                                    'log_prob_micro_batch_size': None,
+[36m(TaskRunner pid=13575)[0m                                    'log_prob_micro_batch_size_per_gpu': 2,
+[36m(TaskRunner pid=13575)[0m                                    'log_prob_use_dynamic_bsz': False,
+[36m(TaskRunner pid=13575)[0m                                    'max_model_len': 8548,
+[36m(TaskRunner pid=13575)[0m                                    'max_num_batched_tokens': 8548,
+[36m(TaskRunner pid=13575)[0m                                    'max_num_seqs': 1024,
+[36m(TaskRunner pid=13575)[0m                                    'n': 16,
+[36m(TaskRunner pid=13575)[0m                                    'n_vote': 32,
+[36m(TaskRunner pid=13575)[0m                                    'name': 'vllm',
+[36m(TaskRunner pid=13575)[0m                                    'prompt_length': 7524,
+[36m(TaskRunner pid=13575)[0m                                    'response_length': 1024,
+[36m(TaskRunner pid=13575)[0m                                    'temperature': 1.0,
+[36m(TaskRunner pid=13575)[0m                                    'tensor_model_parallel_size': 1,
+[36m(TaskRunner pid=13575)[0m                                    'top_k': -1,
+[36m(TaskRunner pid=13575)[0m                                    'top_p': 1,
+[36m(TaskRunner pid=13575)[0m                                    'use_fire_sampling': False,
+[36m(TaskRunner pid=13575)[0m                                    'val_kwargs': {'do_sample': False,
+[36m(TaskRunner pid=13575)[0m                                                   'n': 1,
+[36m(TaskRunner pid=13575)[0m                                                   'temperature': 0.0,
+[36m(TaskRunner pid=13575)[0m                                                   'top_k': -1,
+[36m(TaskRunner pid=13575)[0m                                                   'top_p': 0.95}}},
+[36m(TaskRunner pid=13575)[0m  'algorithm': {'adv_estimator': 'grpo',
+[36m(TaskRunner pid=13575)[0m                'gamma': 1.0,
+[36m(TaskRunner pid=13575)[0m                'kl_ctrl': {'horizon': 10000,
+[36m(TaskRunner pid=13575)[0m                            'kl_coef': 0.0,
+[36m(TaskRunner pid=13575)[0m                            'target_kl': 0.1,
+[36m(TaskRunner pid=13575)[0m A new version of the following files was downloaded from https://huggingface.co/OpenGVLab/InternVL3-2B:
+[36m(TaskRunner pid=13575)[0m - configuration_intern_vit.py
+[36m(TaskRunner pid=13575)[0m . Make sure to double-check they do not contain any added malicious code. To avoid downloading new versions of the code file, you can pin a revision.
+[36m(TaskRunner pid=13575)[0m A new version of the following files was downloaded from https://huggingface.co/OpenGVLab/InternVL3-2B:
+[36m(TaskRunner pid=13575)[0m - configuration_internvl_chat.py
+[36m(TaskRunner pid=13575)[0m - configuration_intern_vit.py
+[36m(TaskRunner pid=13575)[0m . Make sure to double-check they do not contain any added malicious code. To avoid downloading new versions of the code file, you can pin a revision.
+[36m(TaskRunner pid=13575)[0m                            'type': 'fixed'},
+[36m(TaskRunner pid=13575)[0m                'kl_penalty': 'kl',
+[36m(TaskRunner pid=13575)[0m                'lam': 1.0,
+[36m(TaskRunner pid=13575)[0m                'use_kl_in_reward': False},
+[36m(TaskRunner pid=13575)[0m  'critic': {'checkpoint': {'contents': ['model', 'optimizer', 'extra']},
+[36m(TaskRunner pid=13575)[0m             'cliprange_value': 0.5,
+[36m(TaskRunner pid=13575)[0m             'forward_max_token_len_per_gpu': 32768,
+[36m(TaskRunner pid=13575)[0m             'forward_micro_batch_size': None,
+[36m(TaskRunner pid=13575)[0m             'forward_micro_batch_size_per_gpu': 2,
+[36m(TaskRunner pid=13575)[0m             'grad_clip': 1.0,
+[36m(TaskRunner pid=13575)[0m             'model': {'enable_gradient_checkpointing': True,
+[36m(TaskRunner pid=13575)[0m                       'external_lib': None,
+[36m(TaskRunner pid=13575)[0m                       'fsdp_config': {'fsdp_size': -1,
+[36m(TaskRunner pid=13575)[0m                                       'optimizer_offload': False,
+[36m(TaskRunner pid=13575)[0m                                       'param_offload': False,
+[36m(TaskRunner pid=13575)[0m                                       'wrap_policy': {'min_num_params': 0}},
+[36m(TaskRunner pid=13575)[0m                       'override_config': {},
+[36m(TaskRunner pid=13575)[0m                       'path': 'OpenGVLab/InternVL3-2B',
+[36m(TaskRunner pid=13575)[0m                       'tokenizer_path': 'OpenGVLab/InternVL3-2B',
+[36m(TaskRunner pid=13575)[0m                       'use_remove_padding': True},
+[36m(TaskRunner pid=13575)[0m             'optim': {'lr': 9e-06,
+[36m(TaskRunner pid=13575)[0m                       'lr_warmup_steps_ratio': 0.0,
+[36m(TaskRunner pid=13575)[0m                       'min_lr_ratio': None,
+[36m(TaskRunner pid=13575)[0m                       'total_training_steps': -1,
+[36m(TaskRunner pid=13575)[0m                       'warmup_style': 'constant',
+[36m(TaskRunner pid=13575)[0m                       'weight_decay': 0.01},
+[36m(TaskRunner pid=13575)[0m             'ppo_epochs': 1,
+[36m(TaskRunner pid=13575)[0m             'ppo_max_token_len_per_gpu': 32768,
+[36m(TaskRunner pid=13575)[0m             'ppo_micro_batch_size': None,
+[36m(TaskRunner pid=13575)[0m             'ppo_micro_batch_size_per_gpu': 2,
+[36m(TaskRunner pid=13575)[0m             'ppo_mini_batch_size': 1,
+[36m(TaskRunner pid=13575)[0m             'rollout_n': 16,
+[36m(TaskRunner pid=13575)[0m             'shuffle': False,
+[36m(TaskRunner pid=13575)[0m             'strategy': 'fsdp',
+[36m(TaskRunner pid=13575)[0m             'ulysses_sequence_parallel_size': 1,
+[36m(TaskRunner pid=13575)[0m             'use_dynamic_bsz': False},
+[36m(TaskRunner pid=13575)[0m  'custom_reward_function': {'name': 'compute_score', 'path': None},
+[36m(TaskRunner pid=13575)[0m  'data': {'custom_cls': {'name': None, 'path': None},
+[36m(TaskRunner pid=13575)[0m           'filter_overlong_prompts': True,
+[36m(TaskRunner pid=13575)[0m           'filter_overlong_prompts_workers': 1,
+[36m(TaskRunner pid=13575)[0m           'image_key': 'images',
+[36m(TaskRunner pid=13575)[0m           'max_prompt_length': 7524,
+[36m(TaskRunner pid=13575)[0m           'max_response_length': 1024,
+[36m(TaskRunner pid=13575)[0m           'prompt_key': 'prompt',
+[36m(TaskRunner pid=13575)[0m           'return_raw_chat': False,
+[36m(TaskRunner pid=13575)[0m           'return_raw_input_ids': False,
+[36m(TaskRunner pid=13575)[0m           'reward_fn_key': 'data_source',
+[36m(TaskRunner pid=13575)[0m           'shuffle': True,
+[36m(TaskRunner pid=13575)[0m           'suffix_prompt': None,
+[36m(TaskRunner pid=13575)[0m           'tokenizer': None,
+[36m(TaskRunner pid=13575)[0m           'train_batch_size': 4,
+[36m(TaskRunner pid=13575)[0m           'train_files': ['/root/autodl-tmp/TTRV/verl/data/dtd_20/train.parquet'],
+[36m(TaskRunner pid=13575)[0m           'truncation': 'error',
+[36m(TaskRunner pid=13575)[0m           'val_batch_size': None,
+[36m(TaskRunner pid=13575)[0m           'val_files': ['/root/autodl-tmp/TTRV/verl/data/dtd_20/test.parquet'],
+[36m(TaskRunner pid=13575)[0m           'video_key': 'videos'},
+[36m(TaskRunner pid=13575)[0m  'reward_model': {'enable': False,
+[36m(TaskRunner pid=13575)[0m                   'forward_max_token_len_per_gpu': 32768,
+[36m(TaskRunner pid=13575)[0m                   'max_length': None,
+[36m(TaskRunner pid=13575)[0m                   'micro_batch_size': None,
+[36m(TaskRunner pid=13575)[0m                   'micro_batch_size_per_gpu': None,
+[36m(TaskRunner pid=13575)[0m                   'model': {'external_lib': None,
+[36m(TaskRunner pid=13575)[0m                             'fsdp_config': {'fsdp_size': -1,
+[36m(TaskRunner pid=13575)[0m                                             'param_offload': False,
+[36m(TaskRunner pid=13575)[0m                                             'wrap_policy': {'min_num_params': 0}},
+[36m(TaskRunner pid=13575)[0m                             'input_tokenizer': 'OpenGVLab/InternVL3-2B',
+[36m(TaskRunner pid=13575)[0m                             'path': '~/models/FsfairX-LLaMA3-RM-v0.1',
+[36m(TaskRunner pid=13575)[0m                             'use_remove_padding': False},
+[36m(TaskRunner pid=13575)[0m                   'reward_kwargs': {'mode': 'train',
+[36m(TaskRunner pid=13575)[0m                                     'n_samples_per_prompt': 16,
+[36m(TaskRunner pid=13575)[0m                                     'n_votes_per_prompt': 32},
+[36m(TaskRunner pid=13575)[0m                   'reward_manager': 'ttrl',
+[36m(TaskRunner pid=13575)[0m                   'strategy': 'fsdp',
+[36m(TaskRunner pid=13575)[0m                   'ulysses_sequence_parallel_size': 1,
+[36m(TaskRunner pid=13575)[0m                   'use_dynamic_bsz': False},
+[36m(TaskRunner pid=13575)[0m  'trainer': {'balance_batch': True,
+[36m(TaskRunner pid=13575)[0m              'critic_warmup': 0,
+[36m(TaskRunner pid=13575)[0m              'default_hdfs_dir': None,
+[36m(TaskRunner pid=13575)[0m              'default_local_dir': 'checkpoints/TTRL-verl/dtd_20-OpenGVLab_InternVL3-2B/0509/TTRL-Len@3k-grpo-204614',
+[36m(TaskRunner pid=13575)[0m              'del_local_ckpt_after_load': False,
+[36m(TaskRunner pid=13575)[0m              'experiment_name': '0509-TTRL-Len@3k-dtd_20-OpenGVLab_InternVL3-2B-grpo',
+[36m(TaskRunner pid=13575)[0m              'log_val_generations': 0,
+[36m(TaskRunner pid=13575)[0m              'logger': ['console'],
+[36m(TaskRunner pid=13575)[0m              'max_actor_ckpt_to_keep': 0,
+[36m(TaskRunner pid=13575)[0m              'max_critic_ckpt_to_keep': 0,
+[36m(TaskRunner pid=13575)[0m              'n_gpus_per_node': 4,
+[36m(TaskRunner pid=13575)[0m              'nnodes': 1,
+[36m(TaskRunner pid=13575)[0m              'project_name': 'TTRL-verl',
+[36m(TaskRunner pid=13575)[0m              'ray_wait_register_center_timeout': 300,
+[36m(TaskRunner pid=13575)[0m              'resume_from_path': None,
+[36m(TaskRunner pid=13575)[0m              'resume_mode': 'auto',
+[36m(TaskRunner pid=13575)[0m              'save_freq': 20000000,
+[36m(TaskRunner pid=13575)[0m              'test_freq': 200000,
+[36m(TaskRunner pid=13575)[0m              'total_epochs': 2,
+[36m(TaskRunner pid=13575)[0m              'total_training_steps': None,
+[36m(TaskRunner pid=13575)[0m              'val_before_train': True}}
+[36m(TaskRunner pid=13575)[0m tokenizer.context_image_token_id: 151667
+[36m(TaskRunner pid=13575)[0m InterVLProcessor initilizing
+[36m(TaskRunner pid=13575)[0m tokenizer.context_image_token_id: 151667
+[36m(TaskRunner pid=13575)[0m Training the InternVL series
+[36m(TaskRunner pid=13575)[0m ANTLR runtime and generated code versions disagree: 4.9.3!=4.7.2
+[36m(TaskRunner pid=13575)[0m ANTLR runtime and generated code versions disagree: 4.9.3!=4.7.2
+[36m(TaskRunner pid=13575)[0m ANTLR runtime and generated code versions disagree: 4.9.3!=4.7.2
+[36m(TaskRunner pid=13575)[0m Generating train split: 0 examples [00:00, ? examples/s]Generating train split: 20 examples [00:00, 3939.61 examples/s]
+[36m(TaskRunner pid=13575)[0m Setting TOKENIZERS_PARALLELISM=false for forked processes.
+[36m(TaskRunner pid=13575)[0m WARNING:2026-05-09 20:46:55,983:Setting TOKENIZERS_PARALLELISM=false for forked processes.
+[36m(TaskRunner pid=13575)[0m Filtering prompts longer than 7524 tokens (num_proc=1):   0%|                                               | 0/20 [00:00<?, ? examples/s]
+[36m(TaskRunner pid=13575)[0m Filtering prompts longer than 7524 tokens (num_proc=1): 100%|██████████████████████████████████████| 20/20 [00:00<00:00, 22.79 examples/s]
+[36m(TaskRunner pid=13575)[0m Filtering prompts longer than 7524 tokens (num_proc=1): 100%|██████████████████████████████████████| 20/20 [00:00<00:00, 20.40 examples/s]
+[36m(TaskRunner pid=13575)[0m Generating train split: 0 examples [00:00, ? examples/s]Generating train split: 5640 examples [00:00, 477896.46 examples/s]
+[36m(TaskRunner pid=13575)[0m Setting TOKENIZERS_PARALLELISM=false for forked processes.
+[36m(TaskRunner pid=13575)[0m WARNING:2026-05-09 20:46:57,444:Setting TOKENIZERS_PARALLELISM=false for forked processes.
+[36m(TaskRunner pid=13575)[0m Filtering prompts longer than 7524 tokens (num_proc=1):   0%|                                             | 0/5640 [00:00<?, ? examples/s]
+[36m(TaskRunner pid=13575)[0m Filtering prompts longer than 7524 tokens (num_proc=1):  18%|█████▊                           | 1000/5640 [00:01<00:05, 838.01 examples/s]
+[36m(TaskRunner pid=13575)[0m Filtering prompts longer than 7524 tokens (num_proc=1):  35%|███████████▎                    | 2000/5640 [00:01<00:02, 1525.83 examples/s]
+[36m(TaskRunner pid=13575)[0m Filtering prompts longer than 7524 tokens (num_proc=1):  53%|█████████████████               | 3000/5640 [00:01<00:01, 2109.11 examples/s]
+[36m(TaskRunner pid=13575)[0m Filtering prompts longer than 7524 tokens (num_proc=1):  71%|██████████████████████▋         | 4000/5640 [00:01<00:00, 2546.96 examples/s]
+[36m(TaskRunner pid=13575)[0m Filtering prompts longer than 7524 tokens (num_proc=1):  89%|████████████████████████████▎   | 5000/5640 [00:02<00:00, 2889.38 examples/s]
+[36m(TaskRunner pid=13575)[0m Filtering prompts longer than 7524 tokens (num_proc=1): 100%|████████████████████████████████| 5640/5640 [00:02<00:00, 3056.48 examples/s]
+[36m(TaskRunner pid=13575)[0m Filtering prompts longer than 7524 tokens (num_proc=1): 100%|████████████████████████████████| 5640/5640 [00:02<00:00, 2199.24 examples/s]
+[36m(TaskRunner pid=13575)[0m DeprecationWarning: `ray.state.available_resources_per_node` is a private attribute and access will be removed in a future Ray version.
+[36m(TaskRunner pid=13575)[0m WARNING:2026-05-09 20:47:00,052:Waiting for register center actor pjw2dM_register_center to be ready. Elapsed time: 0 seconds out of 300 seconds.
+[36m(WorkerDict pid=14668)[0m '(MaxRetryError("HTTPSConnectionPool(host='huggingface.co', port=443): Max retries exceeded with url: /OpenGVLab/InternVL3-2B/resolve/main/configuration_internvl_chat.py (Caused by ProxyError('Unable to connect to proxy', RemoteDisconnected('Remote end closed connection without response')))"), '(Request ID: a713ddd6-68cb-46f0-b893-b343f4234204)')' thrown while requesting HEAD https://huggingface.co/OpenGVLab/InternVL3-2B/resolve/main/configuration_internvl_chat.py
+[36m(WorkerDict pid=14668)[0m WARNING:2026-05-09 20:47:19,498:'(MaxRetryError("HTTPSConnectionPool(host='huggingface.co', port=443): Max retries exceeded with url: /OpenGVLab/InternVL3-2B/resolve/main/configuration_internvl_chat.py (Caused by ProxyError('Unable to connect to proxy', RemoteDisconnected('Remote end closed connection without response')))"), '(Request ID: a713ddd6-68cb-46f0-b893-b343f4234204)')' thrown while requesting HEAD https://huggingface.co/OpenGVLab/InternVL3-2B/resolve/main/configuration_internvl_chat.py
+[36m(WorkerDict pid=14668)[0m Retrying in 1s [Retry 1/5].
+[36m(WorkerDict pid=14668)[0m WARNING:2026-05-09 20:47:19,498:Retrying in 1s [Retry 1/5].
+[36m(TaskRunner pid=13575)[0m ANTLR runtime and generated code versions disagree: 4.9.3!=4.7.2
+[36m(TaskRunner pid=13575)[0m TTRLRewardManager initialized with n_votes_per_prompt 32, n_samples_per_prompt 16, eval_n_samples 1
+[36m(TaskRunner pid=13575)[0m TTRLRewardManager initialized with n_votes_per_prompt 1, n_samples_per_prompt 1, eval_n_samples 1
+[36m(TaskRunner pid=13575)[0m [validate_config] All configuration checks passed successfully!
+[36m(TaskRunner pid=13575)[0m dataset len: 20
+[36m(TaskRunner pid=13575)[0m filter dataset len: 20
+[36m(TaskRunner pid=13575)[0m dataset len: 5640
+[36m(TaskRunner pid=13575)[0m filter dataset len: 5640
+[36m(TaskRunner pid=13575)[0m Size of train dataloader: 5, Size of val dataloader: 282
+[36m(TaskRunner pid=13575)[0m Total training steps: 10
+[36m(WorkerDict pid=14667)[0m tokenizer.context_image_token_id: 151667
+[36m(WorkerDict pid=14667)[0m InterVLProcessor initilizing
+[36m(WorkerDict pid=14668)[0m tokenizer.context_image_token_id: 151667[32m [repeated 3x across cluster] (Ray deduplicates logs by default. Set RAY_DEDUP_LOGS=0 to disable log deduplication, or see https://docs.ray.io/en/master/ray-observability/user-guides/configure-logging.html#log-deduplication for more options.)[0m
+[36m(WorkerDict pid=14667)[0m Training the InternVL series
+[36m(WorkerDict pid=14668)[0m InterVLProcessor initilizing[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14668)[0m tokenizer.context_image_token_id: 151667[32m [repeated 4x across cluster][0m
+[36m(WorkerDict pid=14301)[0m Model config after override: InternVLChatConfig {
+[36m(WorkerDict pid=14301)[0m   "architectures": [
+[36m(WorkerDict pid=14301)[0m     "InternVLChatModel"
+[36m(WorkerDict pid=14301)[0m   ],
+[36m(WorkerDict pid=14301)[0m   "auto_map": {
+[36m(WorkerDict pid=14301)[0m     "AutoConfig": "OpenGVLab/InternVL3-2B--configuration_internvl_chat.InternVLChatConfig",
+[36m(WorkerDict pid=14301)[0m     "AutoModel": "OpenGVLab/InternVL3-2B--modeling_internvl_chat.InternVLChatModel",
+[36m(WorkerDict pid=14301)[0m     "AutoModelForCausalLM": "OpenGVLab/InternVL3-2B--modeling_internvl_chat.InternVLChatModel"
+[36m(WorkerDict pid=14301)[0m   },
+[36m(WorkerDict pid=14301)[0m   "downsample_ratio": 0.5,
+[36m(WorkerDict pid=14301)[0m   "dynamic_image_size": true,
+[36m(WorkerDict pid=14301)[0m   "eos_token_id": 151645,
+[36m(WorkerDict pid=14301)[0m   "force_image_size": 448,
+[36m(WorkerDict pid=14301)[0m   "hidden_size": 1536,
+[36m(WorkerDict pid=14301)[0m   "image_fold": null,
+[36m(WorkerDict pid=14301)[0m   "llm_config": {
+[36m(WorkerDict pid=14301)[0m     "_name_or_path": "./pretrained/Qwen2.5-32B-Instruct",
+[36m(WorkerDict pid=14301)[0m     "architectures": [
+[36m(WorkerDict pid=14301)[0m       "Qwen2ForCausalLM"
+[36m(WorkerDict pid=14301)[0m     ],
+[36m(WorkerDict pid=14301)[0m     "attention_dropout": 0.0,
+[36m(WorkerDict pid=14301)[0m     "bos_token_id": 151643,
+[36m(WorkerDict pid=14301)[0m     "eos_token_id": 151643,
+[36m(WorkerDict pid=14301)[0m     "hidden_act": "silu",
+[36m(WorkerDict pid=14301)[0m     "hidden_size": 1536,
+[36m(WorkerDict pid=14301)[0m     "initializer_range": 0.02,
+[36m(WorkerDict pid=14301)[0m     "intermediate_size": 8960,
+[36m(WorkerDict pid=14301)[0m     "max_position_embeddings": 32768,
+[36m(WorkerDict pid=14301)[0m     "max_window_layers": 70,
+[36m(WorkerDict pid=14301)[0m     "model_type": "qwen2",
+[36m(WorkerDict pid=14301)[0m     "moe_config": null,
+[36m(WorkerDict pid=14301)[0m     "num_attention_heads": 12,
+[36m(WorkerDict pid=14301)[0m     "num_hidden_layers": 28,
+[36m(WorkerDict pid=14301)[0m     "num_key_value_heads": 2,
+[36m(WorkerDict pid=14301)[0m     "rms_norm_eps": 1e-06,
+[36m(WorkerDict pid=14301)[0m     "rope_scaling": {
+[36m(WorkerDict pid=14301)[0m       "factor": 2.0,
+[36m(WorkerDict pid=14301)[0m       "rope_type": "dynamic",
+[36m(WorkerDict pid=14301)[0m       "type": "dynamic"
+[36m(WorkerDict pid=14301)[0m     },
+[36m(WorkerDict pid=14301)[0m     "rope_theta": 1000000.0,
+[36m(WorkerDict pid=14301)[0m     "sliding_window": null,
+[36m(WorkerDict pid=14301)[0m     "torch_dtype": "bfloat16",
+[36m(WorkerDict pid=14301)[0m     "use_bfloat16": true,
+[36m(WorkerDict pid=14301)[0m     "use_cache": false,
+[36m(WorkerDict pid=14301)[0m     "use_sliding_window": false,
+[36m(WorkerDict pid=14301)[0m     "vocab_size": 151674
+[36m(WorkerDict pid=14301)[0m   },
+[36m(WorkerDict pid=14301)[0m   "max_dynamic_patch": 12,
+[36m(WorkerDict pid=14301)[0m   "min_dynamic_patch": 1,
+[36m(WorkerDict pid=14301)[0m   "model_type": "internvl_chat",
+[36m(WorkerDict pid=14301)[0m   "pad2square": false,
+[36m(WorkerDict pid=14301)[0m   "pad_token_id": 151643,
+[36m(WorkerDict pid=14301)[0m   "ps_version": "v2",
+[36m(WorkerDict pid=14301)[0m   "select_layer": -1,
+[36m(WorkerDict pid=14301)[0m   "system_message": null,
+[36m(WorkerDict pid=14301)[0m   "template": "internvl2_5",
+[36m(WorkerDict pid=14301)[0m   "tie_word_embeddings": false,
+[36m(WorkerDict pid=14301)[0m   "torch_dtype": "bfloat16",
+[36m(WorkerDict pid=14301)[0m   "transformers_version": null,
+[36m(WorkerDict pid=14301)[0m   "use_backbone_lora": 0,
+[36m(WorkerDict pid=14301)[0m   "use_llm_lora": 0,
+[36m(WorkerDict pid=14301)[0m   "use_thumbnail": true,
+[36m(WorkerDict pid=14301)[0m   "vision_config": {
+[36m(WorkerDict pid=14301)[0m     "_name_or_path": "OpenGVLab/InternViT-6B-448px-V1-5",
+[36m(WorkerDict pid=14301)[0m     "architectures": [
+[36m(WorkerDict pid=14301)[0m       "InternVisionModel"
+[36m(WorkerDict pid=14301)[0m     ],
+[36m(WorkerDict pid=14301)[0m     "attention_dropout": 0.0,
+[36m(WorkerDict pid=14301)[0m     "auto_map": {
+[36m(WorkerDict pid=14301)[0m       "AutoConfig": "configuration_intern_vit.InternVisionConfig",
+[36m(WorkerDict pid=14301)[0m       "AutoModel": "modeling_intern_vit.InternVisionModel"
+[36m(WorkerDict pid=14301)[0m     },
+[36m(WorkerDict pid=14301)[0m     "capacity_factor": 1.2,
+[36m(WorkerDict pid=14301)[0m     "drop_path_rate": 0.1,
+[36m(WorkerDict pid=14301)[0m     "dropout": 0.0,
+[36m(WorkerDict pid=14301)[0m     "eval_capacity_factor": 1.4,
+[36m(WorkerDict pid=14301)[0m     "hidden_act": "gelu",
+[36m(WorkerDict pid=14301)[0m     "hidden_size": 1024,
+[36m(WorkerDict pid=14301)[0m     "image_size": 448,
+[36m(WorkerDict pid=14301)[0m     "initializer_factor": 0.1,
+[36m(WorkerDict pid=14301)[0m     "initializer_range": 1e-10,
+[36m(WorkerDict pid=14301)[0m     "intermediate_size": 4096,
+[36m(WorkerDict pid=14301)[0m     "laux_allreduce": "all_nodes",
+[36m(WorkerDict pid=14301)[0m     "layer_norm_eps": 1e-06,
+[36m(WorkerDict pid=14301)[0m     "model_type": "intern_vit_6b",
+[36m(WorkerDict pid=14301)[0m     "moe_coeff_ratio": 0.5,
+[36m(WorkerDict pid=14301)[0m     "moe_intermediate_size": 768,
+[36m(WorkerDict pid=14301)[0m     "moe_output_scale": 4.0,
+[36m(WorkerDict pid=14301)[0m     "noisy_gate_policy": "RSample_before",
+[36m(WorkerDict pid=14301)[0m     "norm_type": "layer_norm",
+[36m(WorkerDict pid=14301)[0m     "num_attention_heads": 16,
+[36m(WorkerDict pid=14301)[0m     "num_channels": 3,
+[36m(WorkerDict pid=14301)[0m     "num_experts": 8,
+[36m(WorkerDict pid=14301)[0m     "num_hidden_layers": 24,
+[36m(WorkerDict pid=14301)[0m     "num_routed_experts": 4,
+[36m(WorkerDict pid=14301)[0m     "num_shared_experts": 4,
+[36m(WorkerDict pid=14301)[0m     "patch_size": 14,
+[36m(WorkerDict pid=14301)[0m     "qk_normalization": false,
+[36m(WorkerDict pid=14301)[0m     "qkv_bias": true,
+[36m(WorkerDict pid=14301)[0m     "shared_expert_intermediate_size": 3072,
+[36m(WorkerDict pid=14301)[0m     "torch_dtype": "bfloat16",
+[36m(WorkerDict pid=14301)[0m     "use_bfloat16": true,
+[36m(WorkerDict pid=14301)[0m     "use_flash_attn": true,
+[36m(WorkerDict pid=14301)[0m     "use_moe": false,
+[36m(WorkerDict pid=14301)[0m     "use_residual": true,
+[36m(WorkerDict pid=14301)[0m     "use_rts": false,
+[36m(WorkerDict pid=14301)[0m     "use_weighted_residual": false
+[36m(WorkerDict pid=14301)[0m   }
+[36m(WorkerDict pid=14669)[0m A new version of the following files was downloaded from https://huggingface.co/OpenGVLab/InternVL3-2B:
+[36m(WorkerDict pid=14669)[0m - conversation.py
+[36m(WorkerDict pid=14669)[0m . Make sure to double-check they do not contain any added malicious code. To avoid downloading new versions of the code file, you can pin a revision.
+[36m(WorkerDict pid=14667)[0m - modeling_intern_vit.py
+[36m(WorkerDict pid=14667)[0m - modeling_internvl_chat.py
+[36m(WorkerDict pid=14667)[0m - modeling_intern_vit.py
+[36m(WorkerDict pid=14669)[0m - conversation.py
+[36m(WorkerDict pid=14301)[0m [rank0]:[W509 20:51:17.786759961 ProcessGroupNCCL.cpp:4561] [PG ID 0 PG GUID 0 Rank 0]  using GPU 0 to perform barrier as devices used by this process are currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. Specify device_ids in barrier() to force use of a particular device, or call init_process_group() with a device_id.
+[36m(WorkerDict pid=14668)[0m A new version of the following files was downloaded from https://huggingface.co/OpenGVLab/InternVL3-2B:[32m [repeated 6x across cluster][0m
+[36m(WorkerDict pid=14668)[0m . Make sure to double-check they do not contain any added malicious code. To avoid downloading new versions of the code file, you can pin a revision.[32m [repeated 6x across cluster][0m
+[36m(WorkerDict pid=14668)[0m - modeling_intern_vit.py[32m [repeated 4x across cluster][0m
+[36m(WorkerDict pid=14301)[0m }
+[36m(WorkerDict pid=14301)[0m 
+[36m(WorkerDict pid=14668)[0m Training the InternVL series[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14669)[0m Monkey patch _flash_attention_forward in transformers.integrations.flash_attention
+[36m(WorkerDict pid=14301)[0m NCCL version 2.21.5+cuda12.4
+[36m(WorkerDict pid=14301)[0m InternVLChatModel contains 2.09B parameters
+[36m(WorkerDict pid=14301)[0m wrap_policy: functools.partial(<function _or_policy at 0x7f78a8e65870>, policies=[functools.partial(<function transformer_auto_wrap_policy at 0x7f78a8e65750>, transformer_layer_cls={<class 'transformers_modules.OpenGVLab.InternVL3-2B.899155015275a9b7338c7f4677e19c784e0e5a21.modeling_intern_vit.InternVisionModel'>, <class 'transformers.models.qwen2.modeling_qwen2.Qwen2DecoderLayer'>})])
+[36m(WorkerDict pid=14301)[0m Actor use_remove_padding=True
+[36m(WorkerDict pid=14667)[0m tokenizer.context_image_token_id: 151667
+[36m(WorkerDict pid=14301)[0m Monkey patch _flash_attention_forward in transformers.integrations.flash_attention[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14668)[0m wrap_policy: functools.partial(<function _or_policy at 0x7f9238549870>, policies=[functools.partial(<function transformer_auto_wrap_policy at 0x7f9238549750>, transformer_layer_cls={<class 'transformers.models.qwen2.modeling_qwen2.Qwen2DecoderLayer'>, <class 'transformers_modules.OpenGVLab.InternVL3-2B.899155015275a9b7338c7f4677e19c784e0e5a21.modeling_intern_vit.InternVisionModel'>})])[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14669)[0m InterVLProcessor initilizing
+[36m(WorkerDict pid=14668)[0m Actor use_remove_padding=True[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14667)[0m Training the InternVL series
+[36m(WorkerDict pid=14667)[0m tokenizer.context_image_token_id: 151667[32m [repeated 4x across cluster][0m
+[36m(WorkerDict pid=14301)[0m Model config after override: InternVLChatConfig {
+[36m(WorkerDict pid=14301)[0m   "architectures": [
+[36m(WorkerDict pid=14301)[0m     "InternVLChatModel"
+[36m(WorkerDict pid=14301)[0m   ],
+[36m(WorkerDict pid=14301)[0m   "auto_map": {
+[36m(WorkerDict pid=14301)[0m     "AutoConfig": "OpenGVLab/InternVL3-2B--configuration_internvl_chat.InternVLChatConfig",
+[36m(WorkerDict pid=14301)[0m     "AutoModel": "OpenGVLab/InternVL3-2B--modeling_internvl_chat.InternVLChatModel",
+[36m(WorkerDict pid=14301)[0m     "AutoModelForCausalLM": "OpenGVLab/InternVL3-2B--modeling_internvl_chat.InternVLChatModel"
+[36m(WorkerDict pid=14301)[0m   },
+[36m(WorkerDict pid=14301)[0m   "downsample_ratio": 0.5,
+[36m(WorkerDict pid=14301)[0m   "dynamic_image_size": true,
+[36m(WorkerDict pid=14301)[0m   "eos_token_id": 151645,
+[36m(WorkerDict pid=14301)[0m   "force_image_size": 448,
+[36m(WorkerDict pid=14301)[0m   "hidden_size": 1536,
+[36m(WorkerDict pid=14301)[0m   "image_fold": null,
+[36m(WorkerDict pid=14301)[0m   "llm_config": {
+[36m(WorkerDict pid=14301)[0m     "_name_or_path": "./pretrained/Qwen2.5-32B-Instruct",
+[36m(WorkerDict pid=14301)[0m     "architectures": [
+[36m(WorkerDict pid=14301)[0m       "Qwen2ForCausalLM"
+[36m(WorkerDict pid=14301)[0m     ],
+[36m(WorkerDict pid=14301)[0m     "attention_dropout": 0.0,
+[36m(WorkerDict pid=14301)[0m     "bos_token_id": 151643,
+[36m(WorkerDict pid=14301)[0m     "eos_token_id": 151643,
+[36m(WorkerDict pid=14301)[0m     "hidden_act": "silu",
+[36m(WorkerDict pid=14301)[0m     "hidden_size": 1536,
+[36m(WorkerDict pid=14301)[0m     "initializer_range": 0.02,
+[36m(WorkerDict pid=14301)[0m     "intermediate_size": 8960,
+[36m(WorkerDict pid=14301)[0m     "max_position_embeddings": 32768,
+[36m(WorkerDict pid=14301)[0m     "max_window_layers": 70,
+[36m(WorkerDict pid=14301)[0m     "model_type": "qwen2",
+[36m(WorkerDict pid=14301)[0m     "moe_config": null,
+[36m(WorkerDict pid=14301)[0m     "num_attention_heads": 12,
+[36m(WorkerDict pid=14301)[0m     "num_hidden_layers": 28,
+[36m(WorkerDict pid=14301)[0m     "num_key_value_heads": 2,
+[36m(WorkerDict pid=14301)[0m     "rms_norm_eps": 1e-06,
+[36m(WorkerDict pid=14301)[0m     "rope_scaling": {
+[36m(WorkerDict pid=14301)[0m       "factor": 2.0,
+[36m(WorkerDict pid=14301)[0m       "rope_type": "dynamic",
+[36m(WorkerDict pid=14301)[0m       "type": "dynamic"
+[36m(WorkerDict pid=14301)[0m     },
+[36m(WorkerDict pid=14301)[0m     "rope_theta": 1000000.0,
+[36m(WorkerDict pid=14301)[0m     "sliding_window": null,
+[36m(WorkerDict pid=14301)[0m     "torch_dtype": "bfloat16",
+[36m(WorkerDict pid=14301)[0m     "use_bfloat16": true,
+[36m(WorkerDict pid=14301)[0m     "use_cache": false,
+[36m(WorkerDict pid=14301)[0m     "use_sliding_window": false,
+[36m(WorkerDict pid=14301)[0m     "vocab_size": 151674
+[36m(WorkerDict pid=14301)[0m   },
+[36m(WorkerDict pid=14301)[0m   "max_dynamic_patch": 12,
+[36m(WorkerDict pid=14301)[0m   "min_dynamic_patch": 1,
+[36m(WorkerDict pid=14301)[0m   "model_type": "internvl_chat",
+[36m(WorkerDict pid=14301)[0m   "pad2square": false,
+[36m(WorkerDict pid=14301)[0m   "pad_token_id": 151643,
+[36m(WorkerDict pid=14301)[0m   "ps_version": "v2",
+[36m(WorkerDict pid=14301)[0m   "select_layer": -1,
+[36m(WorkerDict pid=14301)[0m   "system_message": null,
+[36m(WorkerDict pid=14301)[0m   "template": "internvl2_5",
+[36m(WorkerDict pid=14301)[0m   "tie_word_embeddings": false,
+[36m(WorkerDict pid=14301)[0m   "torch_dtype": "bfloat16",
+[36m(WorkerDict pid=14301)[0m   "transformers_version": null,
+[36m(WorkerDict pid=14301)[0m   "use_backbone_lora": 0,
+[36m(WorkerDict pid=14301)[0m   "use_llm_lora": 0,
+[36m(WorkerDict pid=14301)[0m   "use_thumbnail": true,
+[36m(WorkerDict pid=14301)[0m   "vision_config": {
+[36m(WorkerDict pid=14301)[0m     "_name_or_path": "OpenGVLab/InternViT-6B-448px-V1-5",
+[36m(WorkerDict pid=14301)[0m     "architectures": [
+[36m(WorkerDict pid=14301)[0m       "InternVisionModel"
+[36m(WorkerDict pid=14301)[0m     ],
+[36m(WorkerDict pid=14301)[0m     "attention_dropout": 0.0,
+[36m(WorkerDict pid=14301)[0m     "auto_map": {
+[36m(WorkerDict pid=14301)[0m       "AutoConfig": "configuration_intern_vit.InternVisionConfig",
+[36m(WorkerDict pid=14301)[0m       "AutoModel": "modeling_intern_vit.InternVisionModel"
+[36m(WorkerDict pid=14301)[0m     },
+[36m(WorkerDict pid=14301)[0m     "capacity_factor": 1.2,
+[36m(WorkerDict pid=14301)[0m     "drop_path_rate": 0.1,
+[36m(WorkerDict pid=14301)[0m     "dropout": 0.0,
+[36m(WorkerDict pid=14301)[0m     "eval_capacity_factor": 1.4,
+[36m(WorkerDict pid=14301)[0m     "hidden_act": "gelu",
+[36m(WorkerDict pid=14301)[0m     "hidden_size": 1024,
+[36m(WorkerDict pid=14301)[0m     "image_size": 448,
+[36m(WorkerDict pid=14301)[0m     "initializer_factor": 0.1,
+[36m(WorkerDict pid=14301)[0m     "initializer_range": 1e-10,
+[36m(WorkerDict pid=14301)[0m     "intermediate_size": 4096,
+[36m(WorkerDict pid=14301)[0m     "laux_allreduce": "all_nodes",
+[36m(WorkerDict pid=14301)[0m     "layer_norm_eps": 1e-06,
+[36m(WorkerDict pid=14301)[0m     "model_type": "intern_vit_6b",
+[36m(WorkerDict pid=14301)[0m     "moe_coeff_ratio": 0.5,
+[36m(WorkerDict pid=14301)[0m     "moe_intermediate_size": 768,
+[36m(WorkerDict pid=14301)[0m     "moe_output_scale": 4.0,
+[36m(WorkerDict pid=14301)[0m     "noisy_gate_policy": "RSample_before",
+[36m(WorkerDict pid=14301)[0m     "norm_type": "layer_norm",
+[36m(WorkerDict pid=14301)[0m     "num_attention_heads": 16,
+[36m(WorkerDict pid=14301)[0m     "num_channels": 3,
+[36m(WorkerDict pid=14301)[0m     "num_experts": 8,
+[36m(WorkerDict pid=14301)[0m     "num_hidden_layers": 24,
+[36m(WorkerDict pid=14301)[0m     "num_routed_experts": 4,
+[36m(WorkerDict pid=14301)[0m     "num_shared_experts": 4,
+[36m(WorkerDict pid=14301)[0m     "patch_size": 14,
+[36m(WorkerDict pid=14301)[0m     "qk_normalization": false,
+[36m(WorkerDict pid=14301)[0m     "qkv_bias": true,
+[36m(WorkerDict pid=14301)[0m     "shared_expert_intermediate_size": 3072,
+[36m(WorkerDict pid=14301)[0m     "torch_dtype": "bfloat16",
+[36m(WorkerDict pid=14301)[0m /root/miniconda3/envs/ttrv/lib/python3.10/site-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py:690: FutureWarning: FSDP.state_dict_type() and FSDP.set_state_dict_type() are being deprecated. Please use APIs, get_state_dict() and set_state_dict(), which can support different parallelisms, FSDP1, FSDP2, DDP. API doc: https://pytorch.org/docs/stable/distributed.checkpoint.html#torch.distributed.checkpoint.state_dict.get_state_dict .Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .
+[36m(WorkerDict pid=14301)[0m   warnings.warn(
+[36m(WorkerDict pid=14669)[0m [rank3]:[W509 20:51:17.144791571 ProcessGroupNCCL.cpp:4561] [PG ID 0 PG GUID 0 Rank 3]  using GPU 0 to perform barrier as devices used by this process are currently unknown. This can potentially cause a hang if this rank to GPU mapping is incorrect. Specify device_ids in barrier() to force use of a particular device, or call init_process_group() with a device_id.[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14301)[0m     "use_bfloat16": true,
+[36m(WorkerDict pid=14301)[0m     "use_flash_attn": true,
+[36m(WorkerDict pid=14301)[0m     "use_moe": false,
+[36m(WorkerDict pid=14301)[0m     "use_residual": true,
+[36m(WorkerDict pid=14301)[0m     "use_rts": false,
+[36m(WorkerDict pid=14301)[0m     "use_weighted_residual": false
+[36m(WorkerDict pid=14301)[0m   }
+[36m(WorkerDict pid=14301)[0m }
+[36m(WorkerDict pid=14301)[0m 
+[36m(WorkerDict pid=14301)[0m InterVLProcessor initilizing[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14668)[0m Monkey patch _flash_attention_forward in transformers.integrations.flash_attention
+[36m(WorkerDict pid=14669)[0m Training the InternVL series[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14669)[0m tokenizer.context_image_token_id: 151667[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14301)[0m InternVLChatModel contains 2.09B parameters
+[36m(WorkerDict pid=14301)[0m wrap_policy: functools.partial(<function _or_policy at 0x7f78a8e65870>, policies=[functools.partial(<function transformer_auto_wrap_policy at 0x7f78a8e65750>, transformer_layer_cls={<class 'transformers_modules.OpenGVLab.InternVL3-2B.899155015275a9b7338c7f4677e19c784e0e5a21.modeling_intern_vit.InternVisionModel'>, <class 'transformers.models.qwen2.modeling_qwen2.Qwen2DecoderLayer'>})])
+[36m(WorkerDict pid=14669)[0m Total steps: 10, num_warmup_steps: 0
+[36m(WorkerDict pid=14669)[0m Actor use_remove_padding=True
+[36m(WorkerDict pid=14301)[0m Monkey patch _flash_attention_forward in transformers.integrations.flash_attention[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14301)[0m Before building vllm rollout, memory allocated (GB): 1.95, memory reserved (GB): 9.02, device memory used/total (GB): 10.05/79.25
+[36m(WorkerDict pid=14669)[0m WARNING 05-09 20:51:58 [utils.py:2413] Methods determine_num_available_blocks,device_config,get_cache_block_size_bytes,initialize_cache not implemented in <vllm.v1.worker.gpu_worker.Worker object at 0x7fbdad09dea0>
+[36m(WorkerDict pid=14668)[0m wrap_policy: functools.partial(<function _or_policy at 0x7f9238549870>, policies=[functools.partial(<function transformer_auto_wrap_policy at 0x7f9238549750>, transformer_layer_cls={<class 'transformers.models.qwen2.modeling_qwen2.Qwen2DecoderLayer'>, <class 'transformers_modules.OpenGVLab.InternVL3-2B.899155015275a9b7338c7f4677e19c784e0e5a21.modeling_intern_vit.InternVisionModel'>})])[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14301)[0m Total steps: 10, num_warmup_steps: 0[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14301)[0m Actor use_remove_padding=True[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14667)[0m WARNING 05-09 20:52:02 [topk_topp_sampler.py:69] FlashInfer is not available. Falling back to the PyTorch-native implementation of top-p & top-k sampling. For the best performance, please install FlashInfer.
+[36m(WorkerDict pid=14301)[0m kwargs: {'n': 16, 'logprobs': 0, 'max_tokens': 1024, 'detokenize': False, 'temperature': 1.0, 'top_k': -1, 'top_p': 1, 'ignore_eos': False}
+[36m(WorkerDict pid=14301)[0m After building vllm rollout, memory allocated (GB): 43.86, memory reserved (GB): 44.94, device memory used/total (GB): 4.26/79.25
+[36m(WorkerDict pid=14301)[0m After building sharding manager, memory allocated (GB): 43.86, memory reserved (GB): 44.94, device memory used/total (GB): 4.26/79.25
+[36m(WorkerDict pid=14301)[0m Only support config type of {'llama', 'qwen2_vl', 'qwen2_5_vl', 'deepseek_v3', 'qwen2'}, but got internvl_chat. MFU will always be zero.
+[36m(WorkerDict pid=14301)[0m WARNING 05-09 20:51:59 [utils.py:2413] Methods determine_num_available_blocks,device_config,get_cache_block_size_bytes,initialize_cache not implemented in <vllm.v1.worker.gpu_worker.Worker object at 0x7f778c263f40>[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14669)[0m WARNING 05-09 20:52:02 [topk_topp_sampler.py:69] FlashInfer is not available. Falling back to the PyTorch-native implementation of top-p & top-k sampling. For the best performance, please install FlashInfer.[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14669)[0m Only support config type of {'qwen2', 'deepseek_v3', 'llama', 'qwen2_vl', 'qwen2_5_vl'}, but got internvl_chat. MFU will always be zero.
+[36m(TaskRunner pid=13575)[0m Checkpoint tracker file does not exist: %s /root/autodl-tmp/TTRV/verl/checkpoints/TTRL-verl/dtd_20-OpenGVLab_InternVL3-2B/0509/TTRL-Len@3k-grpo-204614/latest_checkpointed_iteration.txt
+[36m(TaskRunner pid=13575)[0m Training from scratch
+[36m(WorkerDict pid=14667)[0m Only support config type of {'deepseek_v3', 'qwen2_5_vl', 'qwen2_vl', 'qwen2', 'llama'}, but got internvl_chat. MFU will always be zero.
+Error executing job with overrides: ['reward_model.reward_manager=ttrl', 'reward_model.reward_kwargs.n_samples_per_prompt=16', 'reward_model.reward_kwargs.n_votes_per_prompt=32', 'reward_model.reward_kwargs.mode=train', 'data.train_files=[/root/autodl-tmp/TTRV/verl/data/dtd_20/train.parquet]', 'data.val_files=[/root/autodl-tmp/TTRV/verl/data/dtd_20/test.parquet]', 'data.max_prompt_length=7524', 'data.max_response_length=1024', 'data.train_batch_size=4', 'data.filter_overlong_prompts=True', 'data.truncation=error', 'actor_rollout_ref.model.path=OpenGVLab/InternVL3-2B', 'actor_rollout_ref.model.enable_gradient_checkpointing=True', 'actor_rollout_ref.model.use_remove_padding=True', 'actor_rollout_ref.actor.ppo_mini_batch_size=1', 'actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2', 'actor_rollout_ref.actor.use_kl_loss=True', 'actor_rollout_ref.actor.optim.lr=5e-7', 'actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=0.03', 'actor_rollout_ref.actor.optim.warmup_style=cosine', 'actor_rollout_ref.actor.fsdp_config.param_offload=False', 'actor_rollout_ref.actor.fsdp_config.optimizer_offload=False', 'actor_rollout_ref.actor.ppo_max_token_len_per_gpu=8548', 'actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2', 'actor_rollout_ref.ref.fsdp_config.param_offload=True', 'actor_rollout_ref.rollout.name=vllm', 'actor_rollout_ref.rollout.temperature=1.0', 'actor_rollout_ref.rollout.enforce_eager=False', 'actor_rollout_ref.rollout.free_cache_engine=False', 'actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2', 'actor_rollout_ref.rollout.tensor_model_parallel_size=1', 'actor_rollout_ref.rollout.gpu_memory_utilization=0.65', 'actor_rollout_ref.rollout.do_vote=True', 'actor_rollout_ref.rollout.n_vote=32', 'actor_rollout_ref.rollout.n=16', 'actor_rollout_ref.rollout.val_kwargs.do_sample=False', 'actor_rollout_ref.rollout.val_kwargs.n=1', 'actor_rollout_ref.rollout.val_kwargs.top_p=0.95', 'actor_rollout_ref.rollout.val_kwargs.temperature=0.0', 'actor_rollout_ref.rollout.max_model_len=8548', 'actor_rollout_ref.rollout.max_num_batched_tokens=8548', 'critic.optim.lr=9e-6', 'critic.model.use_remove_padding=True', 'critic.model.path=OpenGVLab/InternVL3-2B', 'critic.model.enable_gradient_checkpointing=True', 'critic.ppo_micro_batch_size_per_gpu=2', 'critic.model.fsdp_config.param_offload=False', 'critic.model.fsdp_config.optimizer_offload=False', 'algorithm.kl_ctrl.kl_coef=0.00', 'algorithm.adv_estimator=grpo', 'trainer.logger=[console]', 'trainer.project_name=TTRL-verl', 'trainer.experiment_name=0509-TTRL-Len@3k-dtd_20-OpenGVLab_InternVL3-2B-grpo', 'trainer.n_gpus_per_node=4', 'trainer.nnodes=1', 'trainer.save_freq=20000000', 'trainer.test_freq=200000', 'trainer.max_actor_ckpt_to_keep=0', 'trainer.max_critic_ckpt_to_keep=0', 'trainer.default_local_dir=checkpoints/TTRL-verl/dtd_20-OpenGVLab_InternVL3-2B/0509/TTRL-Len@3k-grpo-204614', 'trainer.total_epochs=2']
+Traceback (most recent call last):
+  File "/root/autodl-tmp/TTRV/verl/verl/trainer/main_ppo.py", line 63, in main
+    run_ppo(config)
+  File "/root/autodl-tmp/TTRV/verl/verl/trainer/main_ppo.py", line 79, in run_ppo
+    ray.get(runner.run.remote(config))
+  File "/root/miniconda3/envs/ttrv/lib/python3.10/site-packages/ray/_private/auto_init_hook.py", line 22, in auto_init_wrapper
+    return fn(*args, **kwargs)
+  File "/root/miniconda3/envs/ttrv/lib/python3.10/site-packages/ray/_private/client_mode_hook.py", line 107, in wrapper
+    return func(*args, **kwargs)
+  File "/root/miniconda3/envs/ttrv/lib/python3.10/site-packages/ray/_private/worker.py", line 2980, in get
+    values, debugger_breakpoint = worker.get_objects(
+  File "/root/miniconda3/envs/ttrv/lib/python3.10/site-packages/ray/_private/worker.py", line 1023, in get_objects
+    raise value.as_instanceof_cause()
+ray.exceptions.RayTaskError(TypeError): [36mray::TaskRunner.run()[39m (pid=13575, ip=172.17.0.2, actor_id=fec0e98098554a94a275892e01000000, repr=<main_ppo.TaskRunner object at 0x7f2aa3f7e800>)
+  File "/root/autodl-tmp/TTRV/verl/verl/trainer/main_ppo.py", line 223, in run
+    trainer.fit()
+  File "/root/autodl-tmp/TTRV/verl/verl/trainer/ppo/ray_trainer.py", line 1027, in fit
+    val_metrics = self._validate()
+  File "/root/autodl-tmp/TTRV/verl/verl/trainer/ppo/ray_trainer.py", line 684, in _validate
+    for test_data in self.val_dataloader:
+  File "/root/miniconda3/envs/ttrv/lib/python3.10/site-packages/torchdata/stateful_dataloader/stateful_dataloader.py", line 450, in __next__
+    return super().__next__()
+  File "/root/miniconda3/envs/ttrv/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 708, in __next__
+    data = self._next_data()
+  File "/root/miniconda3/envs/ttrv/lib/python3.10/site-packages/torchdata/stateful_dataloader/stateful_dataloader.py", line 1456, in _next_data
+    return self._process_data(data, worker_id, state_dict)
+  File "/root/miniconda3/envs/ttrv/lib/python3.10/site-packages/torchdata/stateful_dataloader/stateful_dataloader.py", line 1543, in _process_data
+    data.reraise()
+  File "/root/miniconda3/envs/ttrv/lib/python3.10/site-packages/torch/_utils.py", line 733, in reraise
+    raise exception
+TypeError: Caught TypeError in DataLoader worker process 0.
+Original Traceback (most recent call last):
+  File "/root/miniconda3/envs/ttrv/lib/python3.10/site-packages/torchdata/stateful_dataloader/worker.py", line 242, in _worker_loop
+    data = fetcher.fetch(index)  # type: ignore[union-attr]
+  File "/root/miniconda3/envs/ttrv/lib/python3.10/site-packages/torch/utils/data/_utils/fetch.py", line 52, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/root/miniconda3/envs/ttrv/lib/python3.10/site-packages/torch/utils/data/_utils/fetch.py", line 52, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/root/autodl-tmp/TTRV/verl/verl/utils/dataset/rl_dataset.py", line 221, in __getitem__
+    row_dict, model_inputs, input_ids, attention_mask, raw_prompt = self.preprocessor(messages, row_dict)
+  File "/root/autodl-tmp/TTRV/verl/verl/utils/dataset/preprocessor/internvl.py", line 126, in __call__
+    images = [self.process_image(image) for image in row_dict.pop(self.image_key)]
+TypeError: 'NoneType' object is not iterable
+
+Set the environment variable HYDRA_FULL_ERROR=1 for a complete stack trace.
+[36m(WorkerDict pid=14667)[0m /root/miniconda3/envs/ttrv/lib/python3.10/site-packages/torch/distributed/fsdp/fully_sharded_data_parallel.py:690: FutureWarning: FSDP.state_dict_type() and FSDP.set_state_dict_type() are being deprecated. Please use APIs, get_state_dict() and set_state_dict(), which can support different parallelisms, FSDP1, FSDP2, DDP. API doc: https://pytorch.org/docs/stable/distributed.checkpoint.html#torch.distributed.checkpoint.state_dict.get_state_dict .Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14667)[0m   warnings.warn([32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14667)[0m kwargs: {'n': 16, 'logprobs': 0, 'max_tokens': 1024, 'detokenize': False, 'temperature': 1.0, 'top_k': -1, 'top_p': 1, 'ignore_eos': False}[32m [repeated 3x across cluster][0m
+[36m(WorkerDict pid=14668)[0m Only support config type of {'qwen2', 'qwen2_vl', 'qwen2_5_vl', 'llama', 'deepseek_v3'}, but got internvl_chat. MFU will always be zero.

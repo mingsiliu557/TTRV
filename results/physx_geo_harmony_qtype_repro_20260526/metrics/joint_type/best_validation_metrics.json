@@ -1,0 +1,36 @@
+{
+  "selection_metric": "accuracy",
+  "best_step": 0,
+  "best": {
+    "step": 0,
+    "metrics_path": "/root/autodl-tmp/TTRV/outputs/20260526_geo_harmony_full_joint_type_vote8_sensor_baseline_keep/val_metrics_step0.json",
+    "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/20260526_geo_harmony_full_joint_type_vote8_sensor_baseline_keep/validation_predictions_step0.jsonl",
+    "accuracy": 0.3315145865321342,
+    "num_evaluated": 72944,
+    "invalid_outputs": 1435,
+    "majority_accuracy": 0.36576003509541566,
+    "pass_at_votes": 0.7138626891862251,
+    "best_accuracy_at_votes": 0.7138626891862251,
+    "worst_accuracy_at_votes": 0.045733713533669666,
+    "frequency_mean": 0.5678842673831981,
+    "normalized_entropy_mean": 0.7298218024403488,
+    "ttrv_reward_mean": 0.4859481245887256
+  },
+  "steps": [
+    {
+      "step": 0,
+      "metrics_path": "/root/autodl-tmp/TTRV/outputs/20260526_geo_harmony_full_joint_type_vote8_sensor_baseline_keep/val_metrics_step0.json",
+      "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/20260526_geo_harmony_full_joint_type_vote8_sensor_baseline_keep/validation_predictions_step0.jsonl",
+      "accuracy": 0.3315145865321342,
+      "num_evaluated": 72944,
+      "invalid_outputs": 1435,
+      "majority_accuracy": 0.36576003509541566,
+      "pass_at_votes": 0.7138626891862251,
+      "best_accuracy_at_votes": 0.7138626891862251,
+      "worst_accuracy_at_votes": 0.045733713533669666,
+      "frequency_mean": 0.5678842673831981,
+      "normalized_entropy_mean": 0.7298218024403488,
+      "ttrv_reward_mean": 0.4859481245887256
+    }
+  ]
+}

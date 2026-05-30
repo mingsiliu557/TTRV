@@ -1,0 +1,86 @@
+{
+  "num_evaluated": 32047,
+  "num_correct": 7836,
+  "accuracy": 0.24451586731987393,
+  "invalid_outputs": 599,
+  "hit_max_response_length_outputs": 1737,
+  "hit_max_response_length_rate": 0.05420164133928293,
+  "response_token_len_mean": 12.981121477829438,
+  "response_token_len_max": 24.0,
+  "prediction_distribution": {
+    "A": 14643,
+    "B": 4063,
+    "C": 8103,
+    "D": 4639,
+    "unknown": 599
+  },
+  "ttrl_pseudo_label_distribution": {
+    "none": 32047
+  },
+  "accuracy_by_question_type": {
+    "object_category": {
+      "num_evaluated": 32047,
+      "num_correct": 7836,
+      "invalid_outputs": 599,
+      "accuracy": 0.24451586731987393
+    }
+  },
+  "ttrv_metrics": {
+    "num_groups": 32047,
+    "mean_votes_per_group": 1.0,
+    "response_accuracy": 0.24451586731987393,
+    "acc_at_1": 0.24451586731987393,
+    "majority_accuracy": 0.24451586731987393,
+    "pass_at_votes": 0.24451586731987393,
+    "best_accuracy_at_votes": 0.24451586731987393,
+    "worst_accuracy_at_votes": 0.24451586731987393,
+    "vote_invalid_rate": 0.018691297157300214,
+    "group_invalid_rate": 0.018691297157300214,
+    "frequency_mean": 1.0,
+    "normalized_entropy_mean": 0.0,
+    "raw_entropy_mean": -1.0000889005821938e-12,
+    "ttrv_reward_mean": 0.0,
+    "reward_mean": 0.24451586731987393,
+    "unique_pred_ratio_mean": 1.0,
+    "group_unknown_rate_mean": 0.0,
+    "ttrl_majority_count_mean": 0.0,
+    "ttrl_majority_ratio_mean": 0.0,
+    "ttrl_majority_tie_mean": 0.0,
+    "ttrl_max_majority_ratio_mean": 1.0,
+    "geo_harmony_hm_mean": 0.0,
+    "geo_original_majority_ratio_mean": 1.0,
+    "geo_original_majority_tie_mean": 0.0,
+    "geo_view_support_mean": 0.0,
+    "geo_min_view_prob_mean": 0.0,
+    "geo_min_score_margin_mean": 0.0,
+    "geo_skipped_rate": 0.0,
+    "geo_soft_top_prob_mean": 0.0,
+    "geo_soft_known_count_mean": 0.9813087028426998,
+    "geo_soft_selected_rate": 0.0,
+    "geo_soft_tie_rate": 0.0,
+    "geo_soft_view_support_mean": 0.0,
+    "geo_soft_gt_mass_mean": 0.0,
+    "geo_soft_prob_A_mean": 0.0,
+    "geo_soft_prob_B_mean": 0.0,
+    "geo_soft_prob_C_mean": 0.0,
+    "geo_soft_prob_D_mean": 0.0,
+    "geo_soft_score_A_mean": 0.0,
+    "geo_soft_score_B_mean": 0.0,
+    "geo_soft_score_C_mean": 0.0,
+    "geo_soft_score_D_mean": 0.0
+  },
+  "ttrv_metrics_by_question_type": {
+    "object_category": {
+      "num_groups": 32047,
+      "mean_votes_per_group": 1.0,
+      "response_accuracy": 0.24451586731987393,
+      "acc_at_1": 0.24451586731987393,
+      "majority_accuracy": 0.24451586731987393,
+      "pass_at_votes": 0.24451586731987393,
+      "best_accuracy_at_votes": 0.24451586731987393,
+      "worst_accuracy_at_votes": 0.24451586731987393,
+      "invalid_rate": 0.018691297157300214
+    }
+  },
+  "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_reliable128_soft_keep/runs/20260528_object_original_reliable128_diverse_text_geo_harmony_soft_r8_lr5e10_gamma2_32step_test4_b4_keep/validation_predictions_step8.jsonl"
+}

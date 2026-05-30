@@ -1,0 +1,87 @@
+{
+  "num_evaluated": 10572,
+  "num_correct": 4121,
+  "accuracy": 0.3898032538781687,
+  "invalid_outputs": 107,
+  "hit_max_response_length_outputs": 1104,
+  "hit_max_response_length_rate": 0.10442678774120318,
+  "response_token_len_mean": 17.646613696556944,
+  "response_token_len_max": 24.0,
+  "prediction_distribution": {
+    "A": 1888,
+    "B": 1983,
+    "C": 2308,
+    "D": 4286,
+    "unknown": 107
+  },
+  "ttrl_pseudo_label_distribution": {
+    "none": 10572
+  },
+  "accuracy_by_question_type": {
+    "joint_type": {
+      "num_evaluated": 9118,
+      "num_correct": 3740,
+      "invalid_outputs": 69,
+      "accuracy": 0.4101776705417855
+    },
+    "movable_part": {
+      "num_evaluated": 1454,
+      "num_correct": 381,
+      "invalid_outputs": 38,
+      "accuracy": 0.2620357634112792
+    }
+  },
+  "ttrv_metrics": {
+    "num_groups": 10572,
+    "mean_votes_per_group": 1.0,
+    "response_accuracy": 0.3898032538781687,
+    "acc_at_1": 0.3898032538781687,
+    "majority_accuracy": 0.3898032538781687,
+    "pass_at_votes": 0.3898032538781687,
+    "best_accuracy_at_votes": 0.3898032538781687,
+    "worst_accuracy_at_votes": 0.3898032538781687,
+    "vote_invalid_rate": 0.010121074536511539,
+    "group_invalid_rate": 0.010121074536511539,
+    "frequency_mean": 1.0,
+    "normalized_entropy_mean": 0.0,
+    "raw_entropy_mean": -1.0000889005818951e-12,
+    "ttrv_reward_mean": 0.0,
+    "reward_mean": 0.3898032538781687,
+    "unique_pred_ratio_mean": 1.0,
+    "group_unknown_rate_mean": 0.0,
+    "ttrl_majority_count_mean": 0.0,
+    "ttrl_majority_ratio_mean": 0.0,
+    "ttrl_majority_tie_mean": 0.0,
+    "ttrl_max_majority_ratio_mean": 1.0,
+    "geo_harmony_hm_mean": 0.0,
+    "geo_original_majority_ratio_mean": 0.0,
+    "geo_original_majority_tie_mean": 0.0,
+    "geo_view_support_mean": 0.0,
+    "geo_skipped_rate": 0.0
+  },
+  "ttrv_metrics_by_question_type": {
+    "joint_type": {
+      "num_groups": 9118,
+      "mean_votes_per_group": 1.0,
+      "response_accuracy": 0.4101776705417855,
+      "acc_at_1": 0.4101776705417855,
+      "majority_accuracy": 0.4101776705417855,
+      "pass_at_votes": 0.4101776705417855,
+      "best_accuracy_at_votes": 0.4101776705417855,
+      "worst_accuracy_at_votes": 0.4101776705417855,
+      "invalid_rate": 0.0075674490019741174
+    },
+    "movable_part": {
+      "num_groups": 1454,
+      "mean_votes_per_group": 1.0,
+      "response_accuracy": 0.2620357634112792,
+      "acc_at_1": 0.2620357634112792,
+      "majority_accuracy": 0.2620357634112792,
+      "pass_at_votes": 0.2620357634112792,
+      "best_accuracy_at_votes": 0.2620357634112792,
+      "worst_accuracy_at_votes": 0.2620357634112792,
+      "invalid_rate": 0.026134800550206328
+    }
+  },
+  "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_geo_harmony_combined_sensor_r8_lr5e10_4step_cache/validation_predictions_step1.jsonl"
+}

@@ -1,0 +1,88 @@
+{
+  "enabled": true,
+  "triggered": false,
+  "reason": "not_triggered",
+  "step": 2,
+  "baseline": {
+    "acc": 0.5005379557680812,
+    "invalid_rate": 0.015780035863717873,
+    "hit_max_response_length_rate": 0.05762104004781829,
+    "qtype_acc": {
+      "joint_type": 0.5223627591602555,
+      "movable_part": 0.2600574712643678
+    }
+  },
+  "current": {
+    "acc": 0.49982068141063957,
+    "invalid_rate": 0.012074118350268977,
+    "hit_max_response_length_rate": 0.059414225941422594,
+    "qtype_acc": {
+      "joint_type": 0.5213195983831008,
+      "movable_part": 0.2629310344827586
+    }
+  },
+  "thresholds": {
+    "acc_drop": 0.004,
+    "invalid_increase": 0.008,
+    "hitmax_increase": 0.01,
+    "best_acc_drop": 0.003,
+    "patience": 0,
+    "min_delta": 0.0,
+    "qtype_acc_drop": 0.02,
+    "qtype_drop_count": 1
+  },
+  "state": {
+    "best_acc": 0.5016138673042438,
+    "best_step": 1,
+    "stale_count": 1,
+    "history": [
+      {
+        "step": 0,
+        "snapshot": {
+          "acc": 0.5005379557680812,
+          "invalid_rate": 0.015780035863717873,
+          "hit_max_response_length_rate": 0.05762104004781829,
+          "qtype_acc": {
+            "joint_type": 0.5223627591602555,
+            "movable_part": 0.2600574712643678
+          }
+        },
+        "best": true
+      },
+      {
+        "step": 1,
+        "snapshot": {
+          "acc": 0.5016138673042438,
+          "invalid_rate": 0.014584578601315004,
+          "hit_max_response_length_rate": 0.05917513448894202,
+          "qtype_acc": {
+            "joint_type": 0.5237971052288434,
+            "movable_part": 0.257183908045977
+          }
+        },
+        "best": true,
+        "best_acc": 0.5016138673042438,
+        "best_step": 1,
+        "stale_count": 0
+      },
+      {
+        "step": 2,
+        "snapshot": {
+          "acc": 0.49982068141063957,
+          "invalid_rate": 0.012074118350268977,
+          "hit_max_response_length_rate": 0.059414225941422594,
+          "qtype_acc": {
+            "joint_type": 0.5213195983831008,
+            "movable_part": 0.2629310344827586
+          }
+        },
+        "best": false,
+        "best_acc": 0.5016138673042438,
+        "best_step": 1,
+        "stale_count": 1
+      }
+    ]
+  },
+  "qtype_drops": [],
+  "collapse_step": null
+}

@@ -1,0 +1,67 @@
+{
+  "num_evaluated": 9118,
+  "num_correct": 3204,
+  "accuracy": 0.351392849309059,
+  "invalid_outputs": 91,
+  "hit_max_response_length_outputs": 301,
+  "hit_max_response_length_rate": 0.03301162535643781,
+  "response_token_len_mean": 14.910835709585436,
+  "response_token_len_max": 24.0,
+  "prediction_distribution": {
+    "A": 3358,
+    "B": 1791,
+    "C": 1659,
+    "D": 2219,
+    "unknown": 91
+  },
+  "ttrl_pseudo_label_distribution": {
+    "none": 9118
+  },
+  "accuracy_by_question_type": {
+    "joint_type": {
+      "num_evaluated": 9118,
+      "num_correct": 3204,
+      "invalid_outputs": 91,
+      "accuracy": 0.351392849309059
+    }
+  },
+  "ttrv_metrics": {
+    "num_groups": 9118,
+    "mean_votes_per_group": 1.0,
+    "response_accuracy": 0.351392849309059,
+    "acc_at_1": 0.351392849309059,
+    "majority_accuracy": 0.351392849309059,
+    "pass_at_votes": 0.351392849309059,
+    "best_accuracy_at_votes": 0.351392849309059,
+    "worst_accuracy_at_votes": 0.351392849309059,
+    "vote_invalid_rate": 0.009980258828690502,
+    "group_invalid_rate": 0.009980258828690502,
+    "frequency_mean": 1.0,
+    "normalized_entropy_mean": 0.0,
+    "raw_entropy_mean": -1.000088900581841e-12,
+    "ttrv_reward_mean": 0.0,
+    "reward_mean": 0.351392849309059,
+    "unique_pred_ratio_mean": 1.0,
+    "group_unknown_rate_mean": 0.0,
+    "ttrl_majority_count_mean": 0.0,
+    "ttrl_majority_ratio_mean": 0.0,
+    "ttrl_majority_tie_mean": 0.0,
+    "geo_harmony_hm_mean": 0.0,
+    "geo_view_support_mean": 0.0,
+    "geo_skipped_rate": 0.0
+  },
+  "ttrv_metrics_by_question_type": {
+    "joint_type": {
+      "num_groups": 9118,
+      "mean_votes_per_group": 1.0,
+      "response_accuracy": 0.351392849309059,
+      "acc_at_1": 0.351392849309059,
+      "majority_accuracy": 0.351392849309059,
+      "pass_at_votes": 0.351392849309059,
+      "best_accuracy_at_votes": 0.351392849309059,
+      "worst_accuracy_at_votes": 0.351392849309059,
+      "invalid_rate": 0.009980258828690502
+    }
+  },
+  "predictions_jsonl": "outputs/20260525_geo_harmony_full_joint_type_step4_seed13_lr5e10_hm0p60_r8_unk0_sensor/validation_predictions_step0.jsonl"
+}

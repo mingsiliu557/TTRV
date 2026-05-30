@@ -1,0 +1,343 @@
+{
+  "object_diverse_noearly": {
+    "run_dir": "/root/autodl-tmp/TTRV/outputs/physx_reliable20_soft_keep/runs/20260528_object_original_reliable20_diverse_text_geo_harmony_soft_noearly_3step_b4_keep",
+    "validation": [
+      {
+        "step": 0,
+        "accuracy": 0.39510718632009234,
+        "num_correct": 12662,
+        "num_evaluated": 32047,
+        "invalid_rate": 0.016038942802758447,
+        "hit_max_response_length_rate": 0.0331388273473336
+      },
+      {
+        "step": 1,
+        "accuracy": 0.3920179736012731,
+        "num_correct": 12563,
+        "num_evaluated": 32047,
+        "invalid_rate": 0.013168159266077948,
+        "hit_max_response_length_rate": 0.030642493837176647
+      },
+      {
+        "step": 2,
+        "accuracy": 0.38955284425999315,
+        "num_correct": 12484,
+        "num_evaluated": 32047,
+        "invalid_rate": 0.008893188129934159,
+        "hit_max_response_length_rate": 0.030018410459637407
+      },
+      {
+        "step": 3,
+        "accuracy": 0.39423346959153743,
+        "num_correct": 12634,
+        "num_evaluated": 32047,
+        "invalid_rate": 0.012200830030892127,
+        "hit_max_response_length_rate": 0.033419664867226265
+      }
+    ],
+    "training": [
+      {
+        "step": 1,
+        "response_accuracy": 0.625,
+        "pass_at_votes": 1.0,
+        "majority_accuracy": 1.0,
+        "geo_soft_selected_rate": 0.5,
+        "geo_soft_gt_mass_mean": 0.8160375916699473,
+        "geo_harmony_hm_mean": 0.5830367918876082
+      },
+      {
+        "step": 2,
+        "response_accuracy": 0.5,
+        "pass_at_votes": 1.0,
+        "majority_accuracy": 0.5,
+        "geo_soft_selected_rate": 0.25,
+        "geo_soft_gt_mass_mean": 0.5,
+        "geo_harmony_hm_mean": 0.4851202054985361
+      },
+      {
+        "step": 3,
+        "response_accuracy": 0.46875,
+        "pass_at_votes": 1.0,
+        "majority_accuracy": 0.5,
+        "geo_soft_selected_rate": 0.5,
+        "geo_soft_gt_mass_mean": 0.5,
+        "geo_harmony_hm_mean": 0.45803654188760823
+      }
+    ],
+    "best_validation": {
+      "step": 0,
+      "accuracy": 0.39510718632009234,
+      "num_correct": 12662,
+      "num_evaluated": 32047,
+      "invalid_rate": 0.016038942802758447,
+      "hit_max_response_length_rate": 0.0331388273473336
+    },
+    "delta_best_vs_step0": 0.0
+  },
+  "object_diverse_early": {
+    "run_dir": "/root/autodl-tmp/TTRV/outputs/physx_reliable20_soft_keep/runs/20260528_object_original_reliable20_diverse_text_geo_harmony_soft_r8_lr5e10_gamma2_5step_b4_keep",
+    "validation": [
+      {
+        "step": 0,
+        "accuracy": 0.39510718632009234,
+        "num_correct": 12662,
+        "num_evaluated": 32047,
+        "invalid_rate": 0.016038942802758447,
+        "hit_max_response_length_rate": 0.0331388273473336
+      },
+      {
+        "step": 1,
+        "accuracy": 0.3899272942865167,
+        "num_correct": 12496,
+        "num_evaluated": 32047,
+        "invalid_rate": 0.013043342590570101,
+        "hit_max_response_length_rate": 0.030736106343807534
+      }
+    ],
+    "training": [
+      {
+        "step": 1,
+        "response_accuracy": 0.46875,
+        "pass_at_votes": 1.0,
+        "majority_accuracy": 0.75,
+        "geo_soft_selected_rate": 0.25,
+        "geo_soft_gt_mass_mean": 0.4973595418612041,
+        "geo_harmony_hm_mean": 0.4937510724998588
+      }
+    ],
+    "best_validation": {
+      "step": 0,
+      "accuracy": 0.39510718632009234,
+      "num_correct": 12662,
+      "num_evaluated": 32047,
+      "invalid_rate": 0.016038942802758447,
+      "hit_max_response_length_rate": 0.0331388273473336
+    },
+    "delta_best_vs_step0": 0.0
+  },
+  "object_old_reliable20": {
+    "run_dir": "/root/autodl-tmp/TTRV/outputs/physx_reliable20_soft_keep/runs/20260528_object_original_reliable20_geo_harmony_soft_r8_lr5e10_gamma2_5step_b4_keep",
+    "validation": [
+      {
+        "step": 0,
+        "accuracy": 0.39510718632009234,
+        "num_correct": 12662,
+        "num_evaluated": 32047,
+        "invalid_rate": 0.016038942802758447,
+        "hit_max_response_length_rate": 0.0331388273473336
+      },
+      {
+        "step": 1,
+        "accuracy": 0.39067619433956374,
+        "num_correct": 12520,
+        "num_evaluated": 32047,
+        "invalid_rate": 0.013417792617093643,
+        "hit_max_response_length_rate": 0.031204168876961962
+      }
+    ],
+    "training": [
+      {
+        "step": 1,
+        "response_accuracy": 0.5625,
+        "pass_at_votes": 1.0,
+        "majority_accuracy": 0.75,
+        "geo_soft_selected_rate": 0.5,
+        "geo_soft_gt_mass_mean": 0.7130175376217068,
+        "geo_harmony_hm_mean": 0.5830367918876083
+      }
+    ],
+    "best_validation": {
+      "step": 0,
+      "accuracy": 0.39510718632009234,
+      "num_correct": 12662,
+      "num_evaluated": 32047,
+      "invalid_rate": 0.016038942802758447,
+      "hit_max_response_length_rate": 0.0331388273473336
+    },
+    "delta_best_vs_step0": 0.0
+  },
+  "movable_diverse": {
+    "run_dir": "/root/autodl-tmp/TTRV/outputs/physx_reliable20_soft_keep/runs/20260528_movable_v2_reliable20_diverse_text_geo_harmony_soft_r8_lr5e10_gamma2_5step_b4_keep",
+    "validation": [
+      {
+        "step": 0,
+        "accuracy": 0.2600574712643678,
+        "num_correct": 181,
+        "num_evaluated": 696,
+        "invalid_rate": 0.010057471264367816,
+        "hit_max_response_length_rate": 0.04741379310344827
+      },
+      {
+        "step": 1,
+        "accuracy": 0.2614942528735632,
+        "num_correct": 182,
+        "num_evaluated": 696,
+        "invalid_rate": 0.014367816091954023,
+        "hit_max_response_length_rate": 0.041666666666666664
+      },
+      {
+        "step": 2,
+        "accuracy": 0.2614942528735632,
+        "num_correct": 182,
+        "num_evaluated": 696,
+        "invalid_rate": 0.01293103448275862,
+        "hit_max_response_length_rate": 0.04741379310344827
+      },
+      {
+        "step": 3,
+        "accuracy": 0.26580459770114945,
+        "num_correct": 185,
+        "num_evaluated": 696,
+        "invalid_rate": 0.010057471264367816,
+        "hit_max_response_length_rate": 0.03879310344827586
+      },
+      {
+        "step": 4,
+        "accuracy": 0.2629310344827586,
+        "num_correct": 183,
+        "num_evaluated": 696,
+        "invalid_rate": 0.008620689655172414,
+        "hit_max_response_length_rate": 0.035919540229885055
+      },
+      {
+        "step": 5,
+        "accuracy": 0.2614942528735632,
+        "num_correct": 182,
+        "num_evaluated": 696,
+        "invalid_rate": 0.007183908045977011,
+        "hit_max_response_length_rate": 0.03879310344827586
+      }
+    ],
+    "training": [
+      {
+        "step": 1,
+        "response_accuracy": 0.71875,
+        "pass_at_votes": 1.0,
+        "majority_accuracy": 1.0,
+        "geo_soft_selected_rate": 0.75,
+        "geo_soft_gt_mass_mean": 0.8999996000004162,
+        "geo_harmony_hm_mean": 0.7142867193877493
+      },
+      {
+        "step": 2,
+        "response_accuracy": 0.46875,
+        "pass_at_votes": 0.75,
+        "majority_accuracy": 0.75,
+        "geo_soft_selected_rate": 0.5,
+        "geo_soft_gt_mass_mean": 0.4630176086273238,
+        "geo_harmony_hm_mean": 0.5101200904987703
+      },
+      {
+        "step": 3,
+        "response_accuracy": 0.5,
+        "pass_at_votes": 1.0,
+        "majority_accuracy": 0.5,
+        "geo_soft_selected_rate": 0.75,
+        "geo_soft_gt_mass_mean": 0.5,
+        "geo_harmony_hm_mean": 0.5875010655554284
+      },
+      {
+        "step": 4,
+        "response_accuracy": 0.40625,
+        "pass_at_votes": 0.75,
+        "majority_accuracy": 0.5,
+        "geo_soft_selected_rate": 0.5,
+        "geo_soft_gt_mass_mean": 0.4869231421346755,
+        "geo_harmony_hm_mean": 0.5726200904987702
+      },
+      {
+        "step": 5,
+        "response_accuracy": 0.53125,
+        "pass_at_votes": 1.0,
+        "majority_accuracy": 0.75,
+        "geo_soft_selected_rate": 0.5,
+        "geo_soft_gt_mass_mean": 0.717960650604746,
+        "geo_harmony_hm_mean": 0.5500010199999679
+      }
+    ],
+    "best_validation": {
+      "step": 3,
+      "accuracy": 0.26580459770114945,
+      "num_correct": 185,
+      "num_evaluated": 696,
+      "invalid_rate": 0.010057471264367816,
+      "hit_max_response_length_rate": 0.03879310344827586
+    },
+    "delta_best_vs_step0": 0.005747126436781658
+  },
+  "movable_old_reliable20": {
+    "run_dir": "/root/autodl-tmp/TTRV/outputs/physx_reliable20_soft_keep/runs/20260528_movable_v2_reliable20_geo_harmony_soft_r8_lr5e10_gamma2_5step_b4_keep",
+    "validation": [
+      {
+        "step": 0,
+        "accuracy": 0.2600574712643678,
+        "num_correct": 181,
+        "num_evaluated": 696,
+        "invalid_rate": 0.010057471264367816,
+        "hit_max_response_length_rate": 0.04741379310344827
+      },
+      {
+        "step": 1,
+        "accuracy": 0.257183908045977,
+        "num_correct": 179,
+        "num_evaluated": 696,
+        "invalid_rate": 0.01293103448275862,
+        "hit_max_response_length_rate": 0.04454022988505747
+      },
+      {
+        "step": 2,
+        "accuracy": 0.25862068965517243,
+        "num_correct": 180,
+        "num_evaluated": 696,
+        "invalid_rate": 0.011494252873563218,
+        "hit_max_response_length_rate": 0.040229885057471264
+      },
+      {
+        "step": 3,
+        "accuracy": 0.2471264367816092,
+        "num_correct": 172,
+        "num_evaluated": 696,
+        "invalid_rate": 0.014367816091954023,
+        "hit_max_response_length_rate": 0.04454022988505747
+      }
+    ],
+    "training": [
+      {
+        "step": 1,
+        "response_accuracy": 0.59375,
+        "pass_at_votes": 1.0,
+        "majority_accuracy": 1.0,
+        "geo_soft_selected_rate": 0.5,
+        "geo_soft_gt_mass_mean": 0.7980767810654893,
+        "geo_harmony_hm_mean": 0.5875010099999839
+      },
+      {
+        "step": 2,
+        "response_accuracy": 0.59375,
+        "pass_at_votes": 1.0,
+        "majority_accuracy": 0.75,
+        "geo_soft_selected_rate": 0.25,
+        "geo_soft_gt_mass_mean": 0.7480766920713942,
+        "geo_harmony_hm_mean": 0.5267868443874989
+      },
+      {
+        "step": 3,
+        "response_accuracy": 0.75,
+        "pass_at_votes": 1.0,
+        "majority_accuracy": 1.0,
+        "geo_soft_selected_rate": 0.75,
+        "geo_soft_gt_mass_mean": 1.0,
+        "geo_harmony_hm_mean": 0.7098225012753733
+      }
+    ],
+    "best_validation": {
+      "step": 0,
+      "accuracy": 0.2600574712643678,
+      "num_correct": 181,
+      "num_evaluated": 696,
+      "invalid_rate": 0.010057471264367816,
+      "hit_max_response_length_rate": 0.04741379310344827
+    },
+    "delta_best_vs_step0": 0.0
+  }
+}

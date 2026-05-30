@@ -1,0 +1,183 @@
+{
+  "source_v1_dataset": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/physxnet_mcq_verl_cleaned_options.json",
+  "source_v1_sidecar": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/physxnet_mcq_cleaned_options.jsonl",
+  "step0_predictions": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/fixed_step0_caches/combined_validation_predictions_step0.jsonl",
+  "output_dir": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates",
+  "variants": [
+    {
+      "variant": "pragmatic_plain_balanced",
+      "seed": 13,
+      "num_kept": 8365,
+      "num_skipped": 2207,
+      "kept_by_question_type": {
+        "joint_type": 7669,
+        "movable_part": 696
+      },
+      "skipped_reasons": {
+        "drop_bad_choice_label": 4,
+        "drop_low_visibility_answer_label": 554,
+        "drop_static_no_movement_joint": 1449,
+        "drop_too_many_generic_choice_labels": 167,
+        "duplicate_after_part_label_normalization": 33
+      },
+      "dataset_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/pragmatic_plain_balanced/physxnet_mcq_verl_pragmatic_plain_balanced.json",
+      "sidecar_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/pragmatic_plain_balanced/physxnet_mcq_pragmatic_plain_balanced.jsonl",
+      "skipped_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/pragmatic_plain_balanced/skipped_v2_candidate_cases.jsonl",
+      "retained_step0_estimate": {
+        "note": "This uses v1 step0 predictions and original v1 answer letters on retained ids. It estimates subset quality only; rephrased/reordered prompts need a fresh static evaluation.",
+        "n": 8365,
+        "accuracy": 0.4708906156604901,
+        "invalid_rate": 0.009563658099222952,
+        "hit_max_response_length_rate": 0.09826658696951585,
+        "by_question_type": {
+          "joint_type": {
+            "n": 7669,
+            "accuracy": 0.48676489763984876,
+            "invalid_rate": 0.00847568131438258,
+            "hit_max_response_length_rate": 0.10314252184117877
+          },
+          "movable_part": {
+            "n": 696,
+            "accuracy": 0.2959770114942529,
+            "invalid_rate": 0.021551724137931036,
+            "hit_max_response_length_rate": 0.04454022988505747
+          }
+        },
+        "by_v2_reason": {
+          "joint_plain_language_no_static": {
+            "n": 7669,
+            "accuracy": 0.48676489763984876,
+            "invalid_rate": 0.00847568131438258,
+            "hit_max_response_length_rate": 0.10314252184117877
+          },
+          "movable_visible_part_labels": {
+            "n": 696,
+            "accuracy": 0.2959770114942529,
+            "invalid_rate": 0.021551724137931036,
+            "hit_max_response_length_rate": 0.04454022988505747
+          }
+        }
+      }
+    },
+    {
+      "variant": "joint_plain_no_static",
+      "seed": 13,
+      "num_kept": 7669,
+      "num_skipped": 2903,
+      "kept_by_question_type": {
+        "joint_type": 7669
+      },
+      "skipped_reasons": {
+        "drop_static_no_movement_joint": 1449,
+        "variant_excludes_question_type": 1454
+      },
+      "dataset_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/joint_plain_no_static/physxnet_mcq_verl_joint_plain_no_static.json",
+      "sidecar_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/joint_plain_no_static/physxnet_mcq_joint_plain_no_static.jsonl",
+      "skipped_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/joint_plain_no_static/skipped_v2_candidate_cases.jsonl",
+      "retained_step0_estimate": {
+        "note": "This uses v1 step0 predictions and original v1 answer letters on retained ids. It estimates subset quality only; rephrased/reordered prompts need a fresh static evaluation.",
+        "n": 7669,
+        "accuracy": 0.48676489763984876,
+        "invalid_rate": 0.00847568131438258,
+        "hit_max_response_length_rate": 0.10314252184117877,
+        "by_question_type": {
+          "joint_type": {
+            "n": 7669,
+            "accuracy": 0.48676489763984876,
+            "invalid_rate": 0.00847568131438258,
+            "hit_max_response_length_rate": 0.10314252184117877
+          }
+        },
+        "by_v2_reason": {
+          "joint_plain_language_no_static": {
+            "n": 7669,
+            "accuracy": 0.48676489763984876,
+            "invalid_rate": 0.00847568131438258,
+            "hit_max_response_length_rate": 0.10314252184117877
+          }
+        }
+      }
+    },
+    {
+      "variant": "joint_motion_reliable",
+      "seed": 13,
+      "num_kept": 5982,
+      "num_skipped": 4590,
+      "kept_by_question_type": {
+        "joint_type": 5982
+      },
+      "skipped_reasons": {
+        "drop_low_reliability_static_or_prismatic_joint": 3136,
+        "variant_excludes_question_type": 1454
+      },
+      "dataset_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/joint_motion_reliable/physxnet_mcq_verl_joint_motion_reliable.json",
+      "sidecar_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/joint_motion_reliable/physxnet_mcq_joint_motion_reliable.jsonl",
+      "skipped_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/joint_motion_reliable/skipped_v2_candidate_cases.jsonl",
+      "retained_step0_estimate": {
+        "note": "This uses v1 step0 predictions and original v1 answer letters on retained ids. It estimates subset quality only; rephrased/reordered prompts need a fresh static evaluation.",
+        "n": 5982,
+        "accuracy": 0.5979605483116015,
+        "invalid_rate": 0.009361417586091608,
+        "hit_max_response_length_rate": 0.08241390839184219,
+        "by_question_type": {
+          "joint_type": {
+            "n": 5982,
+            "accuracy": 0.5979605483116015,
+            "invalid_rate": 0.009361417586091608,
+            "hit_max_response_length_rate": 0.08241390839184219
+          }
+        },
+        "by_v2_reason": {
+          "joint_plain_language_no_static": {
+            "n": 5982,
+            "accuracy": 0.5979605483116015,
+            "invalid_rate": 0.009361417586091608,
+            "hit_max_response_length_rate": 0.08241390839184219
+          }
+        }
+      }
+    },
+    {
+      "variant": "movable_visible_strict",
+      "seed": 13,
+      "num_kept": 696,
+      "num_skipped": 9876,
+      "kept_by_question_type": {
+        "movable_part": 696
+      },
+      "skipped_reasons": {
+        "drop_bad_choice_label": 4,
+        "drop_low_visibility_answer_label": 554,
+        "drop_too_many_generic_choice_labels": 167,
+        "duplicate_after_part_label_normalization": 33,
+        "variant_excludes_question_type": 9118
+      },
+      "dataset_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/movable_visible_strict/physxnet_mcq_verl_movable_visible_strict.json",
+      "sidecar_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/movable_visible_strict/physxnet_mcq_movable_visible_strict.jsonl",
+      "skipped_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/movable_visible_strict/skipped_v2_candidate_cases.jsonl",
+      "retained_step0_estimate": {
+        "note": "This uses v1 step0 predictions and original v1 answer letters on retained ids. It estimates subset quality only; rephrased/reordered prompts need a fresh static evaluation.",
+        "n": 696,
+        "accuracy": 0.2959770114942529,
+        "invalid_rate": 0.021551724137931036,
+        "hit_max_response_length_rate": 0.04454022988505747,
+        "by_question_type": {
+          "movable_part": {
+            "n": 696,
+            "accuracy": 0.2959770114942529,
+            "invalid_rate": 0.021551724137931036,
+            "hit_max_response_length_rate": 0.04454022988505747
+          }
+        },
+        "by_v2_reason": {
+          "movable_visible_part_labels": {
+            "n": 696,
+            "accuracy": 0.2959770114942529,
+            "invalid_rate": 0.021551724137931036,
+            "hit_max_response_length_rate": 0.04454022988505747
+          }
+        }
+      }
+    }
+  ]
+}

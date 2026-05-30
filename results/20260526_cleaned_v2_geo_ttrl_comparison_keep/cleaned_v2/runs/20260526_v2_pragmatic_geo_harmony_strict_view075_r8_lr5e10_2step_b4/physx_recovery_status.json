@@ -1,0 +1,50 @@
+{
+  "enabled": true,
+  "restored": true,
+  "trigger_reason": "best_accuracy_drop",
+  "restored_from_step": 1,
+  "restored_at_step": 2,
+  "checkpoint_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/runs/20260526_v2_pragmatic_geo_harmony_strict_view075_r8_lr5e10_2step_b4/checkpoints/global_step_1",
+  "best": {
+    "step": 1,
+    "metric": 0.5032875074716079,
+    "snapshot": {
+      "acc": 0.5032875074716079,
+      "invalid_rate": 0.013269575612671848,
+      "hit_max_response_length_rate": 0.06060968320382546,
+      "qtype_acc": {
+        "joint_type": 0.5254922414917199,
+        "movable_part": 0.25862068965517243
+      }
+    },
+    "checkpoint_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/runs/20260526_v2_pragmatic_geo_harmony_strict_view075_r8_lr5e10_2step_b4/checkpoints/global_step_1"
+  },
+  "history": [
+    {
+      "step": 0,
+      "metric": 0.5005379557680812,
+      "snapshot": {
+        "acc": 0.5005379557680812,
+        "invalid_rate": 0.015780035863717873,
+        "hit_max_response_length_rate": 0.05762104004781829,
+        "qtype_acc": {
+          "joint_type": 0.5223627591602555,
+          "movable_part": 0.2600574712643678
+        }
+      }
+    },
+    {
+      "step": 1,
+      "metric": 0.5032875074716079,
+      "snapshot": {
+        "acc": 0.5032875074716079,
+        "invalid_rate": 0.013269575612671848,
+        "hit_max_response_length_rate": 0.06060968320382546,
+        "qtype_acc": {
+          "joint_type": 0.5254922414917199,
+          "movable_part": 0.25862068965517243
+        }
+      }
+    }
+  ]
+}

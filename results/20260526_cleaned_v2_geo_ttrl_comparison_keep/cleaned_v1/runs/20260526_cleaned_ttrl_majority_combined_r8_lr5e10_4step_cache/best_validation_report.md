@@ -1,0 +1,11 @@
+# Best Validation Step
+
+Selection metric: `accuracy` over parsed A/B/C/D/unknown predictions.
+
+| step | acc | majority_acc | pass@votes | best_acc@votes | worst_acc@votes | invalid | freq_mean | norm_entropy | ttrv_reward |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 0.397654 | 0.397654 | 0.397654 | 0.397654 | 0.397654 | 115 | 1.000000 | 0.000000 | 0.989122 |
+| 1 | 0.386587 | 0.386587 | 0.386587 | 0.386587 | 0.386587 | 106 | 1.000000 | 0.000000 | 0.989974 |
+
+Best step: `0`
+Best metrics: `/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_ttrl_majority_combined_r8_lr5e10_4step_cache/val_metrics_step0.json`

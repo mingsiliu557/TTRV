@@ -1,0 +1,55 @@
+{
+  "variant": "pragmatic_plain_balanced",
+  "seed": 13,
+  "num_kept": 8365,
+  "num_skipped": 2207,
+  "kept_by_question_type": {
+    "joint_type": 7669,
+    "movable_part": 696
+  },
+  "skipped_reasons": {
+    "drop_bad_choice_label": 4,
+    "drop_low_visibility_answer_label": 554,
+    "drop_static_no_movement_joint": 1449,
+    "drop_too_many_generic_choice_labels": 167,
+    "duplicate_after_part_label_normalization": 33
+  },
+  "dataset_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/pragmatic_plain_balanced/physxnet_mcq_verl_pragmatic_plain_balanced.json",
+  "sidecar_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/pragmatic_plain_balanced/physxnet_mcq_pragmatic_plain_balanced.jsonl",
+  "skipped_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v2_candidates/pragmatic_plain_balanced/skipped_v2_candidate_cases.jsonl",
+  "retained_step0_estimate": {
+    "note": "This uses v1 step0 predictions and original v1 answer letters on retained ids. It estimates subset quality only; rephrased/reordered prompts need a fresh static evaluation.",
+    "n": 8365,
+    "accuracy": 0.4708906156604901,
+    "invalid_rate": 0.009563658099222952,
+    "hit_max_response_length_rate": 0.09826658696951585,
+    "by_question_type": {
+      "joint_type": {
+        "n": 7669,
+        "accuracy": 0.48676489763984876,
+        "invalid_rate": 0.00847568131438258,
+        "hit_max_response_length_rate": 0.10314252184117877
+      },
+      "movable_part": {
+        "n": 696,
+        "accuracy": 0.2959770114942529,
+        "invalid_rate": 0.021551724137931036,
+        "hit_max_response_length_rate": 0.04454022988505747
+      }
+    },
+    "by_v2_reason": {
+      "joint_plain_language_no_static": {
+        "n": 7669,
+        "accuracy": 0.48676489763984876,
+        "invalid_rate": 0.00847568131438258,
+        "hit_max_response_length_rate": 0.10314252184117877
+      },
+      "movable_visible_part_labels": {
+        "n": 696,
+        "accuracy": 0.2959770114942529,
+        "invalid_rate": 0.021551724137931036,
+        "hit_max_response_length_rate": 0.04454022988505747
+      }
+    }
+  }
+}

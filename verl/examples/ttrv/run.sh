@@ -1,8 +1,16 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
 #export VLLM_ATTENTION_BACKEND=XFORMERS
 # ray stop
 unset VLLM_ATTENTION_BACKEND
 export VLLM_USE_V1=1
+export HF_HOME="${HF_HOME:-/root/autodl-tmp/.cache/huggingface}"
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+VERL_DIR=$(cd "$SCRIPT_DIR/../.." && pwd)
+cd "$VERL_DIR"
 
 # ------------------------------------------------------------
 mkdir -p logs
@@ -12,52 +20,64 @@ TIME_TAG=$(date +%H%M%S)
 
 
 
-TASK="dtd_20"                       # put the dataset folder name here
-NO_GPU=8
-EPISODE=2
-ADVANTAGE="grpo"
+TASK="${TASK:-dtd_20}"                       # put the dataset folder name here
+NO_GPU="${NO_GPU:-4}"
+EPISODE="${EPISODE:-2}"
+ADVANTAGE="${ADVANTAGE:-grpo}"
 
-K=3
-MAX_PROMPT_LENGTH=7524
-MAX_RESPONSE_LENGTH=$((1024 * 1))
-if [ "$K" -gt 8 ]; then
-  N=4
-else
-  N=16
-fi
-
-N=1 #greedy
+K="${K:-3}"
+MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-7524}"
+MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-1024}"
+N="${N:-1}" # greedy validation by default
 
 
-DATA_TRAIN_BATCH_SIZE=$NO_GPU
-N_VOTES_PER_PROMPT=32
-N_SAMPLES_PER_PROMPT=16
-MINI_BATCH_SIZE=1
-MICRO_BATCH_SIZE=2
+DATA_TRAIN_BATCH_SIZE="${DATA_TRAIN_BATCH_SIZE:-$NO_GPU}"
+N_VOTES_PER_PROMPT="${N_VOTES_PER_PROMPT:-32}"
+N_SAMPLES_PER_PROMPT="${N_SAMPLES_PER_PROMPT:-16}"
+MINI_BATCH_SIZE="${MINI_BATCH_SIZE:-1}"
+MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-2}"
 
-DATA_LOCAL_DIR="path/to/data/verl/data" # change this to your local data directory
+DATA_LOCAL_DIR="${DATA_LOCAL_DIR:-$VERL_DIR/data}" # change this to your local data directory
 
-BACKBONE_PATH="OpenGVLab/InternVL3-2B"
+BACKBONE_PATH="${BACKBONE_PATH:-OpenGVLab/InternVL3-2B}"
+PYTHON_BIN="${PYTHON_BIN:-python}"
 
-MODEL="${TASK}-${BACKBONE}"
+BACKBONE_SAFE=$(echo "$BACKBONE_PATH" | tr '/' '_')
+MODEL="${TASK}-${BACKBONE_SAFE}"
 EXPERIMENT="TTRL-Len@${K}k"
+TTRL_REWARD_STYLE="${TTRL_REWARD_STYLE:-frequency_entropy}"
+SOFT_LABEL_GAMMA="${SOFT_LABEL_GAMMA:-2.0}"
+UNKNOWN_REWARD="${UNKNOWN_REWARD:-0.0}"
+ALL_UNKNOWN_REWARD="${ALL_UNKNOWN_REWARD:-0.0}"
+ENTROPY_COEF="${ENTROPY_COEF:-0.75}"
+ANSWER_PARSE_MODE="${ANSWER_PARSE_MODE:-legacy}"
+HARMONY_TRANSFORM_TYPE="${HARMONY_TRANSFORM_TYPE:-photometric}"
 
 WANDB_PROJECT="TTRL-verl"
 LOG_NAME="${DATE}-${EXPERIMENT}-${MODEL}-${ADVANTAGE}"
 OUTPUT_DIR="checkpoints/${WANDB_PROJECT}/${MODEL}/${DATE}/${EXPERIMENT}-${ADVANTAGE}-${TIME_TAG}"
 
 
-BACKBONE_SAFE=$(echo "$BACKBONE_PATH" | tr '/' '_')
 LOG_FILE="logs/${TASK}_${BACKBONE_SAFE}_${EPISODE}e_${DATE}_${TIME_TAG}.log" # log file name
 
+echo "[run] task=$TASK backbone=$BACKBONE_PATH gpus=$NO_GPU epochs=$EPISODE"
+echo "[run] data=$DATA_LOCAL_DIR reward_style=$TTRL_REWARD_STYLE gamma=$SOFT_LABEL_GAMMA parser=$ANSWER_PARSE_MODE harmony_transform=$HARMONY_TRANSFORM_TYPE"
+echo "[run] log=$LOG_FILE"
 
 # see do_sample
 # ------------------------------------------------------------
-python -m verl.trainer.main_ppo \
+"$PYTHON_BIN" -m verl.trainer.main_ppo \
   reward_model.reward_manager=ttrl \
   reward_model.reward_kwargs.n_samples_per_prompt=$N_SAMPLES_PER_PROMPT \
   reward_model.reward_kwargs.n_votes_per_prompt=$N_VOTES_PER_PROMPT \
   reward_model.reward_kwargs.mode="train" \
+  reward_model.reward_kwargs.reward_style="$TTRL_REWARD_STYLE" \
+  reward_model.reward_kwargs.soft_label_gamma="$SOFT_LABEL_GAMMA" \
+  reward_model.reward_kwargs.unknown_reward="$UNKNOWN_REWARD" \
+  reward_model.reward_kwargs.all_unknown_reward="$ALL_UNKNOWN_REWARD" \
+  reward_model.reward_kwargs.entropy_coef="$ENTROPY_COEF" \
+  reward_model.reward_kwargs.answer_parse_mode="$ANSWER_PARSE_MODE" \
+  reward_model.reward_kwargs.harmony_transform_type="$HARMONY_TRANSFORM_TYPE" \
   data.train_files=["$DATA_LOCAL_DIR/$TASK/train.parquet"] \
   data.val_files=["$DATA_LOCAL_DIR/$TASK/test.parquet"] \
   data.max_prompt_length=$MAX_PROMPT_LENGTH \
@@ -115,4 +135,3 @@ python -m verl.trainer.main_ppo \
   trainer.max_critic_ckpt_to_keep=0 \
   trainer.default_local_dir=$OUTPUT_DIR \
   trainer.total_epochs=$EPISODE "$@" 2>&1 | tee "$LOG_FILE"
-

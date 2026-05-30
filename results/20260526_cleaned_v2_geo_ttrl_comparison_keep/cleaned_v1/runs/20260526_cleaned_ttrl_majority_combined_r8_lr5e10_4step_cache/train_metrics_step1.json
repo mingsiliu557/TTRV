@@ -1,0 +1,71 @@
+{
+  "num_evaluated": 32,
+  "num_correct": 13,
+  "accuracy": 0.40625,
+  "invalid_outputs": 0,
+  "hit_max_response_length_outputs": 5,
+  "hit_max_response_length_rate": 0.15625,
+  "response_token_len_mean": 19.5,
+  "response_token_len_max": 24.0,
+  "prediction_distribution": {
+    "A": 5,
+    "B": 10,
+    "C": 8,
+    "D": 9
+  },
+  "ttrl_pseudo_label_distribution": {
+    "B": 8,
+    "C": 8,
+    "none": 16
+  },
+  "accuracy_by_question_type": {
+    "joint_type": {
+      "num_evaluated": 32,
+      "num_correct": 13,
+      "invalid_outputs": 0,
+      "accuracy": 0.40625
+    }
+  },
+  "ttrv_metrics": {
+    "num_groups": 4,
+    "mean_votes_per_group": 8.0,
+    "response_accuracy": 0.40625,
+    "acc_at_1": null,
+    "majority_accuracy": 0.25,
+    "pass_at_votes": 1.0,
+    "best_accuracy_at_votes": 1.0,
+    "worst_accuracy_at_votes": 0.0,
+    "vote_invalid_rate": 0.0,
+    "group_invalid_rate": 0.0,
+    "frequency_mean": 0.4765625,
+    "normalized_entropy_mean": 0.8134271749030607,
+    "raw_entropy_mean": 0.9036760169326238,
+    "ttrv_reward_mean": 0.375,
+    "reward_mean": 0.375,
+    "unique_pred_ratio_mean": 0.375,
+    "group_unknown_rate_mean": 0.0,
+    "ttrl_majority_count_mean": 4.5,
+    "ttrl_majority_ratio_mean": 0.5625,
+    "ttrl_majority_tie_mean": 0.5,
+    "ttrl_max_majority_ratio_mean": 1.0,
+    "geo_harmony_hm_mean": 0.0,
+    "geo_original_majority_ratio_mean": 0.0,
+    "geo_original_majority_tie_mean": 0.0,
+    "geo_view_support_mean": 0.0,
+    "geo_skipped_rate": 0.0
+  },
+  "ttrv_metrics_by_question_type": {
+    "joint_type": {
+      "num_groups": 4,
+      "mean_votes_per_group": 8.0,
+      "response_accuracy": 0.40625,
+      "acc_at_1": null,
+      "majority_accuracy": 0.25,
+      "pass_at_votes": 1.0,
+      "best_accuracy_at_votes": 1.0,
+      "worst_accuracy_at_votes": 0.0,
+      "invalid_rate": 0.0
+    }
+  },
+  "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_ttrl_majority_combined_r8_lr5e10_4step_cache/training_predictions_step1.jsonl"
+}

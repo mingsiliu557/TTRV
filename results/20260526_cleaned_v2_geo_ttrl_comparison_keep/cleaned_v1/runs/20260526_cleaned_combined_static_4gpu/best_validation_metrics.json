@@ -1,0 +1,36 @@
+{
+  "selection_metric": "accuracy",
+  "best_step": 0,
+  "best": {
+    "step": 0,
+    "metrics_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_combined_static_4gpu/val_metrics_step0.json",
+    "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_combined_static_4gpu/validation_predictions_step0.jsonl",
+    "accuracy": 0.3976541808550889,
+    "num_evaluated": 10572,
+    "invalid_outputs": 115,
+    "majority_accuracy": 0.3976541808550889,
+    "pass_at_votes": 0.3976541808550889,
+    "best_accuracy_at_votes": 0.3976541808550889,
+    "worst_accuracy_at_votes": 0.3976541808550889,
+    "frequency_mean": 1.0,
+    "normalized_entropy_mean": 0.0,
+    "ttrv_reward_mean": 0.9891222096102913
+  },
+  "steps": [
+    {
+      "step": 0,
+      "metrics_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_combined_static_4gpu/val_metrics_step0.json",
+      "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_combined_static_4gpu/validation_predictions_step0.jsonl",
+      "accuracy": 0.3976541808550889,
+      "num_evaluated": 10572,
+      "invalid_outputs": 115,
+      "majority_accuracy": 0.3976541808550889,
+      "pass_at_votes": 0.3976541808550889,
+      "best_accuracy_at_votes": 0.3976541808550889,
+      "worst_accuracy_at_votes": 0.3976541808550889,
+      "frequency_mean": 1.0,
+      "normalized_entropy_mean": 0.0,
+      "ttrv_reward_mean": 0.9891222096102913
+    }
+  ]
+}

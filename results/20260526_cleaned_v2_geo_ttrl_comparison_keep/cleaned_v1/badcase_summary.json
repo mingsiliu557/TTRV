@@ -1,0 +1,137 @@
+{
+  "version": "physx_cleaned_options_v1",
+  "output_dir": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1",
+  "dataset_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/physxnet_mcq_verl_cleaned_options.json",
+  "sidecar_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/physxnet_mcq_cleaned_options.jsonl",
+  "skipped_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/skipped_cleaning_cases.jsonl",
+  "original_dataset_path": "/root/autodl-tmp/TTRV/physx_mcq_workspace/PhysX-3D/outputs/physxnet_mcq_verl.json",
+  "original_sidecar_path": "/root/autodl-tmp/TTRV/physx_mcq_workspace/PhysX-3D/outputs/physxnet_mcq.jsonl",
+  "original_counts": {
+    "total": 44487,
+    "by_question_type": {
+      "joint_type": 9118,
+      "movable_part": 3322,
+      "object_category": 32047
+    }
+  },
+  "cleaned_counts": {
+    "total": 10572,
+    "by_question_type": {
+      "joint_type": 9118,
+      "movable_part": 1454
+    }
+  },
+  "skipped_by_question_type": {
+    "movable_part": 1868,
+    "object_category": 32047
+  },
+  "skipped_reasons": {
+    "movable_part_not_enough_same_object_distractors": 1868,
+    "object_category_not_in_cleaned_v1": 32047
+  },
+  "cleaning_reasons": {
+    "joint_type_canonical_mutually_exclusive": 9118,
+    "movable_part_same_object_distractors": 1454
+  },
+  "joint_original_conflict_reasons": {
+    "compound_prismatic_revolute_vs_single": 5497,
+    "hinge_vs_revolute": 5293,
+    "rigid_vs_no_constraint": 3150
+  },
+  "validation": {
+    "issues": {},
+    "ok": true
+  },
+  "original_fixed_step0_retained": {
+    "joint_type": {
+      "num_records": 9118,
+      "accuracy": 0.351392849309059,
+      "invalid_rate": 0.009980258828690502,
+      "hit_max_response_length_rate": 0.03301162535643781,
+      "confusion": {
+        "A->A": 1084,
+        "A->B": 382,
+        "A->C": 334,
+        "A->D": 477,
+        "A->unknown": 27,
+        "B->A": 791,
+        "B->B": 687,
+        "B->C": 295,
+        "B->D": 487,
+        "B->unknown": 20,
+        "C->A": 704,
+        "C->B": 360,
+        "C->C": 679,
+        "C->D": 501,
+        "C->unknown": 15,
+        "D->A": 779,
+        "D->B": 362,
+        "D->C": 351,
+        "D->D": 754,
+        "D->unknown": 29
+      }
+    },
+    "movable_part": {
+      "num_records": 1454,
+      "accuracy": 0.23865199449793673,
+      "invalid_rate": 0.039202200825309494,
+      "hit_max_response_length_rate": 0.07977991746905089,
+      "confusion": {
+        "A->A": 175,
+        "A->B": 93,
+        "A->C": 37,
+        "A->D": 40,
+        "A->unknown": 5,
+        "B->A": 166,
+        "B->B": 81,
+        "B->C": 34,
+        "B->D": 55,
+        "B->unknown": 21,
+        "C->A": 194,
+        "C->B": 76,
+        "C->C": 41,
+        "C->D": 54,
+        "C->unknown": 16,
+        "D->A": 208,
+        "D->B": 55,
+        "D->C": 38,
+        "D->D": 50,
+        "D->unknown": 15
+      }
+    }
+  },
+  "original_vote8_retained": {
+    "joint_type": {
+      "num_groups": 9118,
+      "majority_accuracy": 0.36576003509541566,
+      "high_confidence_wrong_count": 2348,
+      "high_confidence_all_count": 3921,
+      "pass_at_votes": 0.7138626891862251,
+      "majority_count_distribution": {
+        "2": 40,
+        "3": 944,
+        "4": 2147,
+        "5": 2066,
+        "6": 1635,
+        "7": 1333,
+        "8": 953
+      }
+    },
+    "movable_part": {
+      "num_groups": 1454,
+      "majority_accuracy": 0.24965612104539203,
+      "high_confidence_wrong_count": 385,
+      "high_confidence_all_count": 528,
+      "pass_at_votes": 0.6760660247592847,
+      "majority_count_distribution": {
+        "2": 33,
+        "3": 273,
+        "4": 349,
+        "5": 271,
+        "6": 218,
+        "7": 175,
+        "8": 135
+      }
+    }
+  }
+}

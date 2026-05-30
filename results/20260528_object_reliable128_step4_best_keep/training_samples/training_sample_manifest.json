@@ -1,0 +1,20 @@
+{
+  "first128_answer_counts": {
+    "A": 32,
+    "B": 32,
+    "C": 32,
+    "D": 32
+  },
+  "first16_answer_counts": {
+    "A": 4,
+    "B": 4,
+    "C": 4,
+    "D": 4
+  },
+  "first128_rows_parquet": "/root/autodl-tmp/TTRV/results/20260528_object_reliable128_step4_best_keep/training_samples/selected_training_rows_first128.parquet",
+  "first16_rows_parquet": "/root/autodl-tmp/TTRV/results/20260528_object_reliable128_step4_best_keep/training_samples/best_step_consumed_rows_first16.parquet",
+  "selected_jsonl": "/root/autodl-tmp/TTRV/results/20260528_object_reliable128_step4_best_keep/training_samples/selected_training_samples_128.jsonl",
+  "best_step_consumed_jsonl": "/root/autodl-tmp/TTRV/results/20260528_object_reliable128_step4_best_keep/training_samples/best_step_consumed_samples_first16.jsonl",
+  "source_dataset_dir": "/root/autodl-tmp/TTRV/outputs/physx_reliable128_soft_keep/object_category_original_step0_reliable128_diverse_text_keep",
+  "note": "Step4 best uses TRAIN_BATCH_SIZE=4, so the first 16 selected samples are the consumed adaptation prompts before validation step4."
+}

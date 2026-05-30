@@ -1,0 +1,67 @@
+{
+  "num_evaluated": 32047,
+  "num_correct": 12915,
+  "accuracy": 0.40300184104596376,
+  "invalid_outputs": 539,
+  "hit_max_response_length_outputs": 1254,
+  "hit_max_response_length_rate": 0.0391300277717103,
+  "response_token_len_mean": 12.901270009673292,
+  "response_token_len_max": 24.0,
+  "prediction_distribution": {
+    "A": 17699,
+    "B": 5237,
+    "C": 3574,
+    "D": 4998,
+    "unknown": 539
+  },
+  "ttrl_pseudo_label_distribution": {
+    "none": 32047
+  },
+  "accuracy_by_question_type": {
+    "object_category": {
+      "num_evaluated": 32047,
+      "num_correct": 12915,
+      "invalid_outputs": 539,
+      "accuracy": 0.40300184104596376
+    }
+  },
+  "ttrv_metrics": {
+    "num_groups": 32047,
+    "mean_votes_per_group": 1.0,
+    "response_accuracy": 0.40300184104596376,
+    "acc_at_1": 0.40300184104596376,
+    "majority_accuracy": 0.40300184104596376,
+    "pass_at_votes": 0.40300184104596376,
+    "best_accuracy_at_votes": 0.40300184104596376,
+    "worst_accuracy_at_votes": 0.40300184104596376,
+    "vote_invalid_rate": 0.0168190470246825,
+    "group_invalid_rate": 0.0168190470246825,
+    "frequency_mean": 1.0,
+    "normalized_entropy_mean": 0.0,
+    "raw_entropy_mean": -1.0000889005821938e-12,
+    "ttrv_reward_mean": 0.0,
+    "reward_mean": 0.40300184104596376,
+    "unique_pred_ratio_mean": 1.0,
+    "group_unknown_rate_mean": 0.0,
+    "ttrl_majority_count_mean": 0.0,
+    "ttrl_majority_ratio_mean": 0.0,
+    "ttrl_majority_tie_mean": 0.0,
+    "geo_harmony_hm_mean": 0.0,
+    "geo_view_support_mean": 0.0,
+    "geo_skipped_rate": 0.0
+  },
+  "ttrv_metrics_by_question_type": {
+    "object_category": {
+      "num_groups": 32047,
+      "mean_votes_per_group": 1.0,
+      "response_accuracy": 0.40300184104596376,
+      "acc_at_1": 0.40300184104596376,
+      "majority_accuracy": 0.40300184104596376,
+      "pass_at_votes": 0.40300184104596376,
+      "best_accuracy_at_votes": 0.40300184104596376,
+      "worst_accuracy_at_votes": 0.40300184104596376,
+      "invalid_rate": 0.0168190470246825
+    }
+  },
+  "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/20260525_geo_harmony_full_object_category_step4_seed13_lr5e10_hm0p60_r8_unk0_sensor_keep/validation_predictions_step4.jsonl"
+}

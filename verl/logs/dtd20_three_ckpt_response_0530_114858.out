@@ -1,0 +1,4 @@
+[1/3] ttrv_official ckpt + final validation responses
+[run] task=dtd_20 backbone=OpenGVLab/InternVL3-2B gpus=4 epochs=2
+[run] data=/root/autodl-tmp/TTRV/verl/data reward_style=frequency_entropy gamma=2.0 parser=legacy
+[run] log=logs/dtd_20_OpenGVLab_InternVL3-2B_2e_0530_114858.log

@@ -1,0 +1,37 @@
+{
+  "enabled": true,
+  "restored": true,
+  "trigger_reason": "accuracy_drop",
+  "restored_from_step": 0,
+  "restored_at_step": 1,
+  "checkpoint_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_geo_harmony_combined_sensor_r8_lr5e10_4step_cache/checkpoints/global_step_0",
+  "best": {
+    "step": 0,
+    "metric": 0.3976541808550889,
+    "snapshot": {
+      "acc": 0.3976541808550889,
+      "invalid_rate": 0.010877790389708665,
+      "hit_max_response_length_rate": 0.09998108210367007,
+      "qtype_acc": {
+        "joint_type": 0.4190611976310594,
+        "movable_part": 0.26341127922971114
+      }
+    },
+    "checkpoint_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs/20260526_cleaned_geo_harmony_combined_sensor_r8_lr5e10_4step_cache/checkpoints/global_step_0"
+  },
+  "history": [
+    {
+      "step": 0,
+      "metric": 0.3976541808550889,
+      "snapshot": {
+        "acc": 0.3976541808550889,
+        "invalid_rate": 0.010877790389708665,
+        "hit_max_response_length_rate": 0.09998108210367007,
+        "qtype_acc": {
+          "joint_type": 0.4190611976310594,
+          "movable_part": 0.26341127922971114
+        }
+      }
+    }
+  ]
+}

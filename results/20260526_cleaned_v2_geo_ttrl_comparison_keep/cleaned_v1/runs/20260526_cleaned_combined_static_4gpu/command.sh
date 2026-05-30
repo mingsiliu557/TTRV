@@ -1,0 +1,4 @@
+#!/bin/bash
+set -euo pipefail
+cd /root/autodl-tmp/TTRV
+bash /root/autodl-tmp/TTRV/verl/examples/ttrv/run_physx_mcq_pointllm.sh RUN_MODE=baseline DEBUG=0 SUBSET=-1 VAL_SUBSET=-1 SEED=13 NO_GPU=4 TRAIN_BATCH_SIZE=4 VAL_BATCH_SIZE=32 ROLLOUT_N=1 N_SAMPLES_PER_PROMPT=1 N_VOTES_PER_PROMPT=1 VAL_ROLLOUT_N=1 VAL_DO_SAMPLE=False VAL_TEMPERATURE=0.0 VAL_TOP_P=1.0 REWARD_VARIANT=standard UNKNOWN_REWARD=0.0 POINT_SCOPE=full_object POINTNUM=8192 MAX_RESPONSE_LENGTH=24 DUMP_VALIDATION_PREDICTIONS=True PRINT_VALIDATION_PREDICTIONS=False LOG_VALIDATION_BATCHES=False DATASET_PATH=/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/physxnet_mcq_verl_cleaned_options.json SIDECAR_PATH=/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/physxnet_mcq_cleaned_options.jsonl DATA_DIR=/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/parquet_combined OUTPUT_ROOT=/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/runs RUN_TAG=20260526_cleaned_combined_static_4gpu

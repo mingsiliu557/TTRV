@@ -1,0 +1,51 @@
+{
+  "selection_metric": "accuracy",
+  "best_step": 4,
+  "best": {
+    "step": 4,
+    "metrics_path": "/root/autodl-tmp/TTRV/outputs/20260525_geo_harmony_full_object_category_step4_seed13_lr5e10_hm0p60_r8_unk0_sensor_keep/val_metrics_step4.json",
+    "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/20260525_geo_harmony_full_object_category_step4_seed13_lr5e10_hm0p60_r8_unk0_sensor_keep/validation_predictions_step4.jsonl",
+    "accuracy": 0.40300184104596376,
+    "num_evaluated": 32047,
+    "invalid_outputs": 539,
+    "majority_accuracy": 0.40300184104596376,
+    "pass_at_votes": 0.40300184104596376,
+    "best_accuracy_at_votes": 0.40300184104596376,
+    "worst_accuracy_at_votes": 0.40300184104596376,
+    "frequency_mean": 1.0,
+    "normalized_entropy_mean": 0.0,
+    "ttrv_reward_mean": 0.0
+  },
+  "steps": [
+    {
+      "step": 0,
+      "metrics_path": "/root/autodl-tmp/TTRV/outputs/20260525_geo_harmony_full_object_category_step4_seed13_lr5e10_hm0p60_r8_unk0_sensor_keep/val_metrics_step0.json",
+      "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/20260525_geo_harmony_full_object_category_step4_seed13_lr5e10_hm0p60_r8_unk0_sensor_keep/validation_predictions_step0.jsonl",
+      "accuracy": 0.39510718632009234,
+      "num_evaluated": 32047,
+      "invalid_outputs": 514,
+      "majority_accuracy": 0.39510718632009234,
+      "pass_at_votes": 0.39510718632009234,
+      "best_accuracy_at_votes": 0.39510718632009234,
+      "worst_accuracy_at_votes": 0.39510718632009234,
+      "frequency_mean": 1.0,
+      "normalized_entropy_mean": 0.0,
+      "ttrv_reward_mean": 0.0
+    },
+    {
+      "step": 4,
+      "metrics_path": "/root/autodl-tmp/TTRV/outputs/20260525_geo_harmony_full_object_category_step4_seed13_lr5e10_hm0p60_r8_unk0_sensor_keep/val_metrics_step4.json",
+      "predictions_jsonl": "/root/autodl-tmp/TTRV/outputs/20260525_geo_harmony_full_object_category_step4_seed13_lr5e10_hm0p60_r8_unk0_sensor_keep/validation_predictions_step4.jsonl",
+      "accuracy": 0.40300184104596376,
+      "num_evaluated": 32047,
+      "invalid_outputs": 539,
+      "majority_accuracy": 0.40300184104596376,
+      "pass_at_votes": 0.40300184104596376,
+      "best_accuracy_at_votes": 0.40300184104596376,
+      "worst_accuracy_at_votes": 0.40300184104596376,
+      "frequency_mean": 1.0,
+      "normalized_entropy_mean": 0.0,
+      "ttrv_reward_mean": 0.0
+    }
+  ]
+}

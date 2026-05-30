@@ -1,0 +1,129 @@
+pos,id,question_type,answer,prediction,response_token_len,prediction_raw,object_id,answer_text,correct_option_text,dataset_index
+0,physxnet_mcq_00015393,object_category,A,A,2,A,12008,,Backpack,15392
+1,physxnet_mcq_00014218,object_category,B,B,2,B,11152,,Over-Ear Headphones,14217
+2,physxnet_mcq_00013559,object_category,C,C,2,C,10585,,Wired Over-Ear Headphones,13558
+3,physxnet_mcq_00021292,object_category,D,D,2,D,17022,,Pendant Lamp,21291
+4,physxnet_mcq_00016773,object_category,A,A,2,A,13265,,Bunk Bed with Stairs,16772
+5,physxnet_mcq_00016674,object_category,B,B,5,B. Baseball Cap,13172,,Baseball Cap,16673
+6,physxnet_mcq_00019423,object_category,C,C,2,C,15432,,Table Lamp,19422
+7,physxnet_mcq_00022896,object_category,D,D,2,D,19284,,Table,22895
+8,physxnet_mcq_00023117,object_category,A,A,2,A,19570,,Office Table,23116
+9,physxnet_mcq_00007386,object_category,B,B,6,B. Computer Monitor,5458,,Computer Monitor,7385
+10,physxnet_mcq_00002247,object_category,C,C,2,C,1801,,Water Faucet,2246
+11,physxnet_mcq_00023004,object_category,D,D,2,D,19414,,Round Table,23003
+12,physxnet_mcq_00023669,object_category,A,A,2,A,20354,,Extendable Glass Table,23668
+13,physxnet_mcq_00037150,object_category,B,B,8,B. Swivel Armchair,40964,,Swivel Armchair,37149
+14,physxnet_mcq_00024371,object_category,C,C,2,C,21402,,Coffee Table,24370
+15,physxnet_mcq_00023204,object_category,D,D,2,D,19691,,Dining Table,23203
+16,physxnet_mcq_00023901,object_category,A,A,2,A,20806,,Glass Table,23900
+17,physxnet_mcq_00002802,object_category,B,B,9,B. Shower Faucet System,2019,,Shower Faucet System,2801
+18,physxnet_mcq_00039491,object_category,C,C,2,C,43831,,Chair,39490
+19,physxnet_mcq_00025864,object_category,D,D,2,D,23463,,Drop-leaf Table,25863
+20,physxnet_mcq_00024285,object_category,A,A,2,A,21304,,Conference Table,24284
+21,physxnet_mcq_00012058,object_category,B,B,9,B. Protective Display Panel,9088,,Protective Display Panel,12057
+22,physxnet_mcq_00040851,object_category,C,C,2,C,45512,,Nightstand,40850
+23,physxnet_mcq_00027984,object_category,D,D,2,D,26410,,Side Table,27983
+24,physxnet_mcq_00024641,object_category,A,A,2,A,21746,,Glass Display Table,24640
+25,physxnet_mcq_00013494,object_category,B,B,7,The correct answer is B.,10536,,Over-Ear Headphones with Microphone,13493
+26,physxnet_mcq_00043551,object_category,C,C,2,C,48209,,Cubby Storage Organizer,43550
+27,physxnet_mcq_00032044,object_category,D,D,2,D,34672,,Drafting Table,32043
+28,physxnet_mcq_00025237,object_category,A,A,2,A,22531,,Billiards Table,25236
+29,physxnet_mcq_00014122,object_category,B,B,7,The correct answer is B.,11082,,Bunk Bed with Storage and Ladder,14121
+30,physxnet_mcq_00007167,object_category,C,C,2,C,5272,,Monitor,7166
+31,physxnet_mcq_00034456,object_category,D,D,2,D,37853,,Armchair,34455
+32,physxnet_mcq_00025721,object_category,A,A,2,A,23183,,Extendable Table,25720
+33,physxnet_mcq_00015470,object_category,B,B,7,The correct answer is B.,12051,,Refrigerator,15469
+34,physxnet_mcq_00007539,object_category,C,C,4,CRT Television,5587,,CRT Television,7538
+35,physxnet_mcq_00041972,object_category,D,D,2,D,46467,,Dresser,41971
+36,physxnet_mcq_00025929,object_category,A,A,2,A,23600,,Office Desk,25928
+37,physxnet_mcq_00015698,object_category,B,B,7,The object is a hat.,12191,,Hat,15697
+38,physxnet_mcq_00013023,object_category,C,C,5,C. Laptop,10163,,Laptop,13022
+39,physxnet_mcq_00012148,object_category,D,D,2,D,9153,,Door,12147
+40,physxnet_mcq_00026041,object_category,A,A,2,A,23755,,Glass Top Table,26040
+41,physxnet_mcq_00016574,object_category,B,B,7,The object is a keyboard.,12961,,Keyboard,16573
+42,physxnet_mcq_00023111,object_category,C,C,5,C. Square Table,19563,,Square Table,23110
+43,physxnet_mcq_00003272,object_category,D,D,3,D.,2257,,Director Chair,3271
+44,physxnet_mcq_00026885,object_category,A,A,2,A,24895,,Table Tennis Set,26884
+45,physxnet_mcq_00017222,object_category,B,B,7,The correct answer is B.,13610,,Tripod Floor Lamp,17221
+46,physxnet_mcq_00027391,object_category,C,C,5,C. Bench,25591,,Bench,27390
+47,physxnet_mcq_00035628,object_category,D,D,4,D. ,39219,,Storage Chest,35627
+48,physxnet_mcq_00027265,object_category,A,A,2,A,25412,,Folding Table,27264
+49,physxnet_mcq_00019074,object_category,B,B,7,The correct answer is B.,15142,,Arc Floor Lamp,19073
+50,physxnet_mcq_00040383,object_category,C,C,5,C. Cabinet,45183,,Cabinet,40382
+51,physxnet_mcq_00043396,object_category,D,D,4,D. ,48007,,Storage Cabinet,43395
+52,physxnet_mcq_00027337,object_category,A,A,2,A,25517,,Small Cabinet,27336
+53,physxnet_mcq_00019486,object_category,B,B,7,The correct answer is B.,15492,,Pulley Pendant Lamp,19485
+54,physxnet_mcq_00012551,object_category,C,C,5,C. Top Hat,9611,,Top Hat,12550
+55,physxnet_mcq_00024100,object_category,D,D,5,D. Small Table,21070,,Small Table,24099
+56,physxnet_mcq_00028325,object_category,A,A,2,A,27072,,Adjustable Table,28324
+57,physxnet_mcq_00020882,object_category,B,B,7,The correct answer is B.,16650,,Lava Lamp,20881
+58,physxnet_mcq_00013407,object_category,C,C,6,C. Headphones,10457,,Headphones,13406
+59,physxnet_mcq_00024176,object_category,D,D,5,D. Desk,21168,,Desk,24175
+60,physxnet_mcq_00031081,object_category,A,A,2,A,32201,,Mounting Base Assembly,31080
+61,physxnet_mcq_00023378,object_category,B,B,7,The correct answer is B.,19921,,Rectangular Coffee Table,23377
+62,physxnet_mcq_00017467,object_category,C,C,6,C. Street Lamp,13781,,Street Lamp,17466
+63,physxnet_mcq_00025872,object_category,D,D,5,D. Display Table,23473,,Display Table,25871
+64,physxnet_mcq_00032221,object_category,A,A,2,A,35129,,Rocking Chair,32220
+65,physxnet_mcq_00002958,object_category,B,B,7,The correct answer is B.,2084,,Wall-mounted Faucet,2957
+66,physxnet_mcq_00024059,object_category,C,C,6,C. Platform Bed Frame,21021,,Platform Bed Frame,24058
+67,physxnet_mcq_00037876,object_category,D,D,5,D. Office Chair,41838,,Office Chair,37875
+68,physxnet_mcq_00040681,object_category,A,A,2,A,45386,,Cabinet with Shelves and Drawers,40680
+69,physxnet_mcq_00024598,object_category,B,B,7,The correct answer is B.,21690,,Bookshelf,24597
+70,physxnet_mcq_00025743,object_category,C,C,6,C. Computer Desk,23209,,Computer Desk,25742
+71,physxnet_mcq_00043936,object_category,D,D,5,D. Entertainment Center,48653,,Entertainment Center,43935
+72,physxnet_mcq_00041861,object_category,A,A,2,A,46340,,Mobile Storage Cabinet,41860
+73,physxnet_mcq_00026226,object_category,B,B,7,The correct answer is B.,23996,,Storage Bench,26225
+74,physxnet_mcq_00029211,object_category,C,C,6,C. Table Tennis Table,28350,,Table Tennis Table,29210
+75,physxnet_mcq_00008968,object_category,D,D,5,D. Storage Bin,6447,,Storage Bin,8967
+76,physxnet_mcq_00042965,object_category,A,A,2,A,47525,,Mobile Drawer Cabinet,42964
+77,physxnet_mcq_00026718,object_category,B,B,7,The correct answer is B.,24673,,Rectangular Table,26717
+78,physxnet_mcq_00012555,object_category,C,C,6,C. Cowboy Hat,9616,,Cowboy Hat,12554
+79,physxnet_mcq_00011308,object_category,D,D,5,D. Mug,8589,,Mug,11307
+80,physxnet_mcq_00043673,object_category,A,A,2,A,48358,,Cabinet Shelf Unit,43672
+81,physxnet_mcq_00003578,object_category,B,B,7,The correct answer is B.,2554,,Ergonomic Office Chair,3577
+82,physxnet_mcq_00000823,object_category,C,C,7,C. Combat Knife,1063,,Combat Knife,822
+83,physxnet_mcq_00014092,object_category,D,D,6,D. Scissors,11061,,Scissors,14091
+84,physxnet_mcq_00009989,object_category,A,A,2,A,6938,,Pedestrian Bollard,9988
+85,physxnet_mcq_00027482,object_category,B,B,7,The correct answer is B.,25727,,Square Pedestal Table,27481
+86,physxnet_mcq_00013683,object_category,C,C,7,C. Medical Scissors,10686,,Medical Scissors,13682
+87,physxnet_mcq_00014360,object_category,D,D,6,D. Storage Barrel,11254,,Storage Barrel,14359
+88,physxnet_mcq_00013233,object_category,A,A,4,A. Bed,10323,,Bed,13232
+89,physxnet_mcq_00029426,object_category,B,B,7,The correct answer is B.,28648,,Workbench Table with Drawer,29425
+90,physxnet_mcq_00031531,object_category,C,C,7,C. Corner Desk,33221,,Corner Desk,31530
+91,physxnet_mcq_00002436,object_category,D,D,6,D. Faucet,1870,,Faucet,2435
+92,physxnet_mcq_00021609,object_category,A,A,2,A,17322,,Table Lamp,21608
+93,physxnet_mcq_00030370,object_category,B,B,7,The correct answer is B.,30361,,Rolling Pallet Table,30369
+94,physxnet_mcq_00007295,object_category,C,C,7,C. Curved Monitor,5381,,Curved Monitor,7294
+95,physxnet_mcq_00022676,object_category,D,D,6,D. Display Shelf,19022,,Display Shelf,22675
+96,physxnet_mcq_00024605,object_category,A,A,2,A,21697,,Conference Table,24604
+97,physxnet_mcq_00031942,object_category,B,B,7,The correct answer is B.,34253,,Office Desk with Hutch,31941
+98,physxnet_mcq_00002671,object_category,C,C,8,C. Kitchen Faucet,1960,,Kitchen Faucet,2670
+99,physxnet_mcq_00023664,object_category,D,D,6,D. Rolling Table,20349,,Rolling Table,23663
+100,physxnet_mcq_00026085,object_category,A,A,2,A,23813,,Glass Table,26084
+101,physxnet_mcq_00032238,object_category,B,B,7,The correct answer is B.,35144,,Two-Seater Waiting Room Chair,32237
+102,physxnet_mcq_00034435,object_category,C,C,8,C. Modern Cantilever Chair,37832,,Modern Cantilever Chair,34434
+103,physxnet_mcq_00027492,object_category,D,D,6,D. Square Office Table,25737,,Square Office Table,27491
+104,physxnet_mcq_00028253,object_category,A,A,2,A,26967,,Coffee Table,28252
+105,physxnet_mcq_00004586,object_category,B,B,7,The correct answer is B.,3554,,Water Bottle,4585
+106,physxnet_mcq_00019011,object_category,C,C,10,C. Adjustable Desk Lamp,15084,,Adjustable Desk Lamp,19010
+107,physxnet_mcq_00027740,object_category,D,D,6,D. Drawer Table,26073,,Drawer Table,27739
+108,physxnet_mcq_00029917,object_category,A,A,2,A,29340,,Adjustable Table,29916
+109,physxnet_mcq_00004634,object_category,B,B,7,The correct answer is B.,3574,,Gas Cylinder,4633
+110,physxnet_mcq_00030963,object_category,C,C,4,Oval Table,31760,,Oval Table,30962
+111,physxnet_mcq_00030248,object_category,D,D,6,D. Modular Table,30053,,Modular Table,30247
+112,physxnet_mcq_00030153,object_category,A,A,2,A,29825,,Office Desk,30152
+113,physxnet_mcq_00033966,object_category,B,B,7,The correct answer is B.,37307,,Mobile Armchair with Writing Tablet,33965
+114,physxnet_mcq_00016755,object_category,C,C,7,The correct answer is C.,13233,,Over-Ear Headset with Microphone,16754
+115,physxnet_mcq_00032984,object_category,D,D,6,D. Dining Chair,36155,,Dining Chair,32983
+116,physxnet_mcq_00030505,object_category,A,A,2,A,30800,,Billiards Table,30504
+117,physxnet_mcq_00035838,object_category,B,B,7,The correct answer is B.,39447,,Base Cabinet,35837
+118,physxnet_mcq_00002011,object_category,C,C,7,The correct answer is C.,1715,,Water Dispenser Tap,2010
+119,physxnet_mcq_00039732,object_category,D,D,6,D. Bar Stool,44163,,Bar Stool,39731
+120,physxnet_mcq_00030929,object_category,A,A,2,A,31665,,Drop-leaf Table,30928
+121,physxnet_mcq_00005650,object_category,B,B,7,The correct answer is B.,4049,,Plastic Bottle with Lid,5649
+122,physxnet_mcq_00031075,object_category,C,C,7,The correct answer is C.,32175,,Wooden Table with Drawer,31074
+123,physxnet_mcq_00044188,object_category,D,D,6,D. Display Cabinet,48984,,Display Cabinet,44187
+124,physxnet_mcq_00034569,object_category,A,A,2,A,37982,,Armchair,34568
+125,physxnet_mcq_00037642,object_category,B,B,7,The correct answer is B.,41493,,Cabinet with Shelves and Doors,37641
+126,physxnet_mcq_00034839,object_category,C,C,7,The correct answer is C.,38339,,Swivel Chair,34838
+127,physxnet_mcq_00010500,object_category,D,D,6,D. Double Oven,7187,,Double Oven,10499

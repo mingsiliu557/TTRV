@@ -1,0 +1,20 @@
+{
+  "dataset_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/physxnet_mcq_verl_cleaned_options.json",
+  "sidecar_path": "/root/autodl-tmp/TTRV/outputs/physx_cleaned_options_v1/physxnet_mcq_cleaned_options.jsonl",
+  "num_dataset": 10572,
+  "num_sidecar": 10572,
+  "question_type_counts": {
+    "joint_type": 9118,
+    "movable_part": 1454
+  },
+  "issues": {},
+  "issue_examples": {},
+  "requires_dataset_fix": false,
+  "verl_prompt_compatibility": {
+    "has_image_placeholder": true,
+    "has_options_header": true,
+    "has_abcd_options": true,
+    "has_letter_only_instruction": true,
+    "has_no_explanation_instruction": true
+  }
+}
