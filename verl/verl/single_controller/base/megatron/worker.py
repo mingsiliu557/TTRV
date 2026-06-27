@@ -65,7 +65,14 @@ class MegatronWorker(Worker):
         update_model_config(hf_config, override_config_kwargs=override_config_kwargs)
         self.architectures = getattr(hf_config, "architectures", None)
         if self.rank == 0:
-            print(f"Model config after override: {hf_config}")
+            config_summary = {
+                "model_type": getattr(hf_config, "model_type", None),
+                "architectures": getattr(hf_config, "architectures", None),
+                "hidden_size": getattr(hf_config, "hidden_size", None),
+                "vocab_size": getattr(hf_config, "vocab_size", None),
+                "torch_dtype": str(getattr(hf_config, "torch_dtype", None)),
+            }
+            print(f"Model config after override: {config_summary}")
         tf_config = hf_to_mcore_config(hf_config, dtype)
 
         def add_optimization_config_to_tf_config(tf_config, verl_model_config):
@@ -80,6 +87,6 @@ class MegatronWorker(Worker):
 
         add_optimization_config_to_tf_config(tf_config, self.config.model)
 
-        print(f"TF config: {tf_config}")
+        print(f"TF config: {type(tf_config).__name__}")
         self.hf_config = hf_config
         self.tf_config = tf_config

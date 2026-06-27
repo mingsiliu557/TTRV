@@ -149,20 +149,7 @@ cleanup() {
     echo "[cleanup] no log found for pattern: $LOG_GLOB"
   fi
 
-  case "$SHUTDOWN_ON_EXIT" in
-    1|true|TRUE|yes|YES)
-      if command -v shutdown >/dev/null 2>&1; then
-        echo "[cleanup] scheduling shutdown in ${SHUTDOWN_DELAY_MINUTES} minutes."
-        echo "[cleanup] cancel with: shutdown -c"
-        shutdown -h +"$SHUTDOWN_DELAY_MINUTES" || true
-      else
-        echo "[cleanup] shutdown command not found; skip shutdown."
-      fi
-      ;;
-    *)
-      echo "[cleanup] SHUTDOWN_ON_EXIT=$SHUTDOWN_ON_EXIT, skip shutdown."
-      ;;
-  esac
+  echo "[cleanup] shutdown disabled on this machine; release GPU resources by exiting the volc shell."
 
   exit "$exit_code"
 }
@@ -174,7 +161,7 @@ echo "[run] repo: $VERL_DIR"
 echo "[run] task=$TASK backbone=$BACKBONE_PATH episode=$EPISODE no_gpu=$NO_GPU test_freq=$TEST_FREQ"
 echo "[run] data=$DATA_LOCAL_DIR image_root=$IMAGE_ROOT"
 echo "[run] expected log pattern: $LOG_GLOB"
-echo "[run] shutdown_on_exit=$SHUTDOWN_ON_EXIT delay=${SHUTDOWN_DELAY_MINUTES}m"
+echo "[run] shutdown disabled; shutdown_on_exit=$SHUTDOWN_ON_EXIT is ignored"
 
 set +e
 bash "$SCRIPT_DIR/run.sh" \

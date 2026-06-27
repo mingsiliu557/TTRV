@@ -21,3 +21,8 @@ __pycache__/
 *.py[cod]
 .ipynb_checkpoints/
 .cache/
+
+# Local markdown experiment notes and reports.
+*.md
+!/README.md
+!/AGENTS.md

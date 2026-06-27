@@ -201,7 +201,14 @@ class ActorRolloutRefWorker(Worker):
         override_config_kwargs.update(override_model_config)
         update_model_config(actor_model_config, override_config_kwargs=override_config_kwargs)
         if self.rank == 0:
-            print(f"Model config after override: {actor_model_config}")
+            config_summary = {
+                "model_type": getattr(actor_model_config, "model_type", None),
+                "architectures": getattr(actor_model_config, "architectures", None),
+                "hidden_size": getattr(actor_model_config, "hidden_size", None),
+                "vocab_size": getattr(actor_model_config, "vocab_size", None),
+                "torch_dtype": str(getattr(actor_model_config, "torch_dtype", None)),
+            }
+            print(f"Model config after override: {config_summary}")
 
         # NOTE(fix me): tie_word_embedding causes meta_tensor init to hang
         init_context = get_init_weight_context_manager(
@@ -628,9 +635,24 @@ class ActorRolloutRefWorker(Worker):
         # perform recompute log_prob
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data)
-            output, entropys = self.actor.compute_log_prob(data=data, calculate_entropy=True)
+            return_response_embeddings = bool(data.meta_info.get("return_response_embeddings", False))
+            log_probs_result = self.actor.compute_log_prob(
+                data=data,
+                calculate_entropy=True,
+                return_response_embeddings=return_response_embeddings,
+            )
+            if return_response_embeddings:
+                output, entropys, response_embeddings = log_probs_result
+                tensors = {
+                    "old_log_probs": output,
+                    "entropys": entropys,
+                    "response_embeddings": response_embeddings,
+                }
+            else:
+                output, entropys = log_probs_result
+                tensors = {"old_log_probs": output, "entropys": entropys}
             output = DataProto.from_dict(
-                tensors={"old_log_probs": output, "entropys": entropys},
+                tensors=tensors,
                 meta_info={"temperature": self.config.rollout.temperature},
             )
             output = self.ulysses_sharding_manager.postprocess_data(output)

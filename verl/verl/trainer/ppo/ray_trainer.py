@@ -19,6 +19,7 @@ This trainer supports model-agonistic model initialization with huggingface
 import os
 import hashlib
 import random
+import re
 import uuid
 from collections import defaultdict
 from contextlib import contextmanager
@@ -52,6 +53,7 @@ from verl.trainer.ppo.metric_utils import (
 )
 from verl.utils.checkpoint.checkpoint_manager import find_latest_ckpt_path
 from verl.utils.dataset.rl_dataset import RLHFDataset, collate_fn
+from verl.utils.model import compute_position_id_with_mask
 from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from verl.utils.tracking import ValidationGenerationsLogger
 
@@ -232,6 +234,320 @@ def _build_harmony_transform_batch(gen_batch: DataProto, source_batch: DataProto
         transform_metadata.append(sample_metadata[0] if len(sample_metadata) == 1 else sample_metadata)
     transform_batch.non_tensor_batch["multi_modal_data"] = np.array(transformed_multi_modal_data, dtype=object)
     return transform_batch, transform_metadata
+
+
+DENSITY_EMBEDDING_REWARD_STYLES = {
+    "density_peak_hard",
+    "density_peak_soft",
+    "density_peak_answer_entropy",
+    "density_peak_density_entropy",
+    "density_cluster_soft",
+    "density_cluster_answer_entropy",
+    "density_cluster_density_entropy",
+}
+
+
+_DENSITY_EVIDENCE_DEFAULT_TEMPLATE = (
+    "Candidate answer: {response}\n"
+    "Visual evidence supporting this candidate answer:"
+)
+
+_DENSITY_CANONICAL_EVIDENCE_DEFAULT_TEMPLATE = (
+    "Candidate option: {candidate}\n"
+    "Visual evidence needed:"
+)
+
+_DENSITY_CANONICAL_OPTION_DEFAULT_TEMPLATE = "Candidate option: {candidate}"
+
+
+def _decode_response_for_evidence(tokenizer, response_ids, response_mask):
+    valid_len = int(response_mask.sum().detach().cpu().item())
+    if valid_len <= 0:
+        return "unknown"
+    token_ids = response_ids[:valid_len].detach().cpu().tolist()
+    text = tokenizer.decode(token_ids, skip_special_tokens=True).strip()
+    return text if text else "unknown"
+
+
+def _decode_prompt_for_evidence(tokenizer, prompt_ids, prompt_mask):
+    valid_ids = prompt_ids[prompt_mask.to(dtype=torch.bool)]
+    if valid_ids.numel() <= 0:
+        return ""
+    return tokenizer.decode(valid_ids.detach().cpu().tolist(), skip_special_tokens=True)
+
+
+def _extract_choice_options_from_prompt(prompt_text: str):
+    if not prompt_text:
+        return {}
+
+    marker_match = None
+    for marker in re.finditer(r"\b(?:options|choices)\s*:", prompt_text, flags=re.IGNORECASE):
+        marker_match = marker
+    option_text = prompt_text[marker_match.end():] if marker_match else prompt_text
+    option_text = re.sub(r"\s+", " ", option_text).strip()
+
+    pattern = re.compile(r"(?:^|\s)(?:\(([A-F])\)|([A-F])\s*[\.:])\s*")
+    matches = list(pattern.finditer(option_text))
+    options = {}
+    for idx, match in enumerate(matches):
+        label = (match.group(1) or match.group(2) or "").upper()
+        if not label:
+            continue
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(option_text)
+        value = option_text[start:end].strip()
+        value = re.sub(r"\s*assistant\s*$", "", value, flags=re.IGNORECASE).strip()
+        value = re.sub(r"<\|im_end\|>.*$", "", value).strip()
+        if value:
+            options[label] = value
+    return options
+
+
+def _extract_choice_label_from_response(response_text: str, valid_labels):
+    if not response_text:
+        return None
+    labels = "".join(sorted(valid_labels or set("ABCDEF")))
+    if not labels:
+        labels = "ABCDEF"
+    escaped = re.escape(labels)
+    text = response_text.strip()
+
+    patterns = [
+        rf"^[\s\(\[\{{:;,\.\-\|/\\$]*([{escaped}])(?:\b|[\)\]\}}\.:\-,\|/\\$])",
+        rf"\b(?:answer|option|choice)\s*(?:is|:)?\s*\(?([{escaped}])\)?\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).upper()
+    return None
+
+
+def _canonicalize_density_evidence_text(prompt_text: str, response_text: str, template: str):
+    options = _extract_choice_options_from_prompt(prompt_text)
+    label = _extract_choice_label_from_response(response_text, set(options) or set("ABCDEF"))
+    option = options.get(label) if label else None
+
+    if label and option:
+        candidate = f"{label}. {option}"
+    elif label:
+        candidate = label
+    else:
+        candidate = "unknown"
+
+    return template.format(
+        response=response_text,
+        answer=label or response_text,
+        candidate=candidate,
+        option_label=label or "unknown",
+        option_text=option or "",
+    )
+
+
+def _build_density_evidence_query_batch(
+    batch: DataProto,
+    tokenizer,
+    template: str = None,
+    canonicalize: bool = False,
+):
+    if "prompts" not in batch.batch.keys():
+        raise ValueError("density evidence embedding requires prompts in batch")
+    if "responses" not in batch.batch.keys():
+        raise ValueError("density evidence embedding requires responses in batch")
+
+    if not template:
+        template = _DENSITY_CANONICAL_EVIDENCE_DEFAULT_TEMPLATE if canonicalize else _DENSITY_EVIDENCE_DEFAULT_TEMPLATE
+    prompts = batch.batch["prompts"]
+    responses = batch.batch["responses"]
+    prompt_length = prompts.size(-1)
+    response_length = responses.size(-1)
+    prompt_attention_mask = batch.batch["attention_mask"][:, :prompt_length]
+    response_mask = batch.batch.get("response_mask")
+    if response_mask is None:
+        response_mask = batch.batch["attention_mask"][:, -response_length:]
+
+    pad_token_id = tokenizer.pad_token_id
+    if pad_token_id is None:
+        pad_token_id = tokenizer.eos_token_id if tokenizer.eos_token_id is not None else 0
+    device = responses.device
+    evidence_responses = torch.full_like(responses, fill_value=int(pad_token_id))
+    evidence_response_mask = torch.zeros_like(response_mask)
+    evidence_queries = []
+    evidence_token_lengths = []
+
+    for row_idx in range(responses.size(0)):
+        decoded_response = _decode_response_for_evidence(tokenizer, responses[row_idx], response_mask[row_idx])
+        if canonicalize:
+            decoded_prompt = _decode_prompt_for_evidence(tokenizer, prompts[row_idx], prompt_attention_mask[row_idx])
+            evidence_text = _canonicalize_density_evidence_text(decoded_prompt, decoded_response, template)
+        else:
+            evidence_text = template.format(
+                response=decoded_response,
+                answer=decoded_response,
+                candidate=decoded_response,
+                option_label="unknown",
+                option_text="",
+            )
+        token_ids = tokenizer.encode(evidence_text, add_special_tokens=False)[:response_length]
+        if not token_ids:
+            token_ids = [int(pad_token_id)]
+        token_tensor = torch.tensor(token_ids, dtype=responses.dtype, device=device)
+        token_count = token_tensor.numel()
+        evidence_responses[row_idx, :token_count] = token_tensor
+        evidence_response_mask[row_idx, :token_count] = 1
+        evidence_queries.append(evidence_text)
+        evidence_token_lengths.append(token_count)
+
+    evidence_attention_mask = torch.cat([prompt_attention_mask, evidence_response_mask], dim=-1)
+    evidence_position_ids = compute_position_id_with_mask(evidence_attention_mask)
+    if batch.batch["position_ids"].dim() == 3:
+        mrope_dim = batch.batch["position_ids"].size(1)
+        evidence_position_ids = evidence_position_ids.unsqueeze(1).expand(-1, mrope_dim, -1)
+
+    non_tensor_keys = ["multi_modal_inputs"] if "multi_modal_inputs" in batch.non_tensor_batch else []
+    evidence_batch = batch.select(
+        batch_keys=["responses", "input_ids", "attention_mask", "position_ids"],
+        non_tensor_batch_keys=non_tensor_keys,
+        deepcopy=True,
+    )
+    evidence_batch.batch["responses"] = evidence_responses
+    evidence_batch.batch["input_ids"] = torch.cat([prompts, evidence_responses], dim=-1)
+    evidence_batch.batch["attention_mask"] = evidence_attention_mask
+    evidence_batch.batch["position_ids"] = evidence_position_ids
+    evidence_batch.meta_info = deepcopy(batch.meta_info)
+    evidence_batch.meta_info["return_response_embeddings"] = True
+    return evidence_batch, evidence_queries, evidence_token_lengths
+
+
+def _random_patch_papo_perturbation(
+    image,
+    patch_size: int,
+    mask_prob: float,
+    seed: int,
+    mask_type: str = "black",
+):
+    from PIL import ImageDraw, ImageFilter
+
+    if patch_size <= 0:
+        raise ValueError(f"patch_size must be positive, got {patch_size}")
+    if not (0.0 <= mask_prob <= 1.0):
+        raise ValueError(f"mask_prob must be in [0, 1], got {mask_prob}")
+
+    mask_type = str(mask_type or "black").lower().strip()
+    aliases = {
+        "random_patch_blackening": "black",
+        "blackening": "black",
+        "black": "black",
+        "random_patch_gray": "gray",
+        "grey": "gray",
+        "gray": "gray",
+        "random_patch_blur": "blur",
+        "blur": "blur",
+    }
+    if mask_type not in aliases:
+        raise ValueError(f"Unsupported PAPO mask_type={mask_type!r}; expected one of {sorted(aliases)}")
+    mask_type = aliases[mask_type]
+
+    image = image.convert("RGB").copy()
+    width, height = image.size
+    rng = random.Random(seed)
+    draw = ImageDraw.Draw(image)
+
+    total_patches = 0
+    perturbed_patches = 0
+    blur_radius = max(1.0, patch_size / 3.0)
+    for top in range(0, height, patch_size):
+        for left in range(0, width, patch_size):
+            total_patches += 1
+            if rng.random() >= mask_prob:
+                continue
+            right = min(width, left + patch_size)
+            bottom = min(height, top + patch_size)
+            if mask_type == "black":
+                draw.rectangle((left, top, right - 1, bottom - 1), fill=(0, 0, 0))
+            elif mask_type == "gray":
+                draw.rectangle((left, top, right - 1, bottom - 1), fill=(127, 127, 127))
+            elif mask_type == "blur":
+                patch = image.crop((left, top, right, bottom)).filter(ImageFilter.GaussianBlur(radius=blur_radius))
+                image.paste(patch, (left, top))
+            perturbed_patches += 1
+
+    perturbed_ratio = perturbed_patches / total_patches if total_patches else 0.0
+    metadata = {
+        "papo_mask_type": f"random_patch_{mask_type}",
+        "papo_mask_patch_size": patch_size,
+        "papo_mask_prob": mask_prob,
+        "papo_mask_total_patches": total_patches,
+        "papo_mask_perturbed_patches": perturbed_patches,
+        "papo_mask_perturbed_ratio": perturbed_ratio,
+        # Kept for backward-compatible metrics and scripts.
+        "papo_mask_blackened_patches": perturbed_patches,
+        "papo_mask_blackened_ratio": perturbed_ratio,
+    }
+    return image, metadata
+
+
+def _random_patch_blackening(image, patch_size: int, black_prob: float, seed: int):
+    return _random_patch_papo_perturbation(
+        image,
+        patch_size=patch_size,
+        mask_prob=black_prob,
+        seed=seed,
+        mask_type="black",
+    )
+
+
+def _processor_prompt_for_masked_branch(prompt: str) -> str:
+    # InternVL stores <image> in prompts but expects <IMG_CONTEXT> during processor encoding.
+    return prompt.replace("<image>", "<IMG_CONTEXT>")
+
+
+def _build_papo_masked_multi_modal_inputs(
+    batch: DataProto,
+    processor,
+    patch_size: int,
+    black_prob: float,
+    global_step: int,
+    mask_type: str = "black",
+):
+    if processor is None:
+        raise ValueError("PAPO perception loss requires a multimodal processor")
+    if "multi_modal_data" not in batch.non_tensor_batch:
+        raise ValueError("PAPO perception loss requires multi_modal_data in the training batch")
+    if "full_prompts" not in batch.non_tensor_batch:
+        raise ValueError("PAPO perception loss requires data.return_full_prompt=True")
+
+    masked_inputs = []
+    masked_metadata = []
+    full_prompts = batch.non_tensor_batch["full_prompts"]
+    multi_modal_data_batch = batch.non_tensor_batch["multi_modal_data"]
+
+    for sample_i, (prompt, multi_modal_data) in enumerate(zip(full_prompts, multi_modal_data_batch)):
+        if not isinstance(multi_modal_data, dict) or "image" not in multi_modal_data:
+            raise ValueError("PAPO perception loss currently supports image multimodal data only")
+
+        masked_images = []
+        sample_metadata = []
+        for image_i, image in enumerate(multi_modal_data["image"]):
+            masked_image, metadata = _random_patch_papo_perturbation(
+                image,
+                patch_size=patch_size,
+                mask_prob=black_prob,
+                seed=_harmony_seed(global_step, sample_i, image_i),
+                mask_type=mask_type,
+            )
+            masked_images.append(masked_image)
+            sample_metadata.append(metadata)
+
+        prompt_text = _processor_prompt_for_masked_branch(str(prompt))
+        model_inputs = processor(text=[prompt_text], images=masked_images, return_tensors="pt")
+        model_inputs.pop("input_ids", None)
+        model_inputs.pop("attention_mask", None)
+        model_inputs.pop("second_per_grid_ts", None)
+        masked_inputs.append(dict(model_inputs))
+        masked_metadata.append(sample_metadata[0] if len(sample_metadata) == 1 else sample_metadata)
+
+    return np.array(masked_inputs, dtype=object), np.array(masked_metadata, dtype=object)
 
 
 class Role(Enum):
@@ -1241,10 +1557,15 @@ class RayPPOTrainer:
                         meta_info_keys=["do_vote"]
                     )
 
-                use_vision_self_harmony = (
-                    self.use_ttrl
-                    and self.config.reward_model.reward_kwargs.get("reward_style", None) == "vision_self_harmony"
-                )
+                reward_style = self.config.reward_model.reward_kwargs.get("reward_style", None)
+                if (
+                    self.config.actor_rollout_ref.actor.get("use_papo_prcp_loss", False)
+                    and "multi_modal_data" in gen_batch.non_tensor_batch
+                ):
+                    batch.non_tensor_batch["multi_modal_data"] = deepcopy(
+                        gen_batch.non_tensor_batch["multi_modal_data"]
+                    )
+                use_vision_self_harmony = self.use_ttrl and reward_style == "vision_self_harmony"
                 if use_vision_self_harmony:
                     harmony_transform_type = self.config.reward_model.reward_kwargs.get(
                         "harmony_transform_type", "photometric"
@@ -1321,6 +1642,22 @@ class RayPPOTrainer:
 
                     # recompute old_log_probs
                     with _timer("old_log_prob", timing_raw):
+                        use_density_embeddings = bool(
+                            self.use_ttrl and reward_style in DENSITY_EMBEDDING_REWARD_STYLES
+                        )
+                        use_response_embeddings = bool(
+                            self.use_ttrl
+                            and (
+                                reward_style in {"feature_center_hard", "feature_center_hsr"}
+                                or use_density_embeddings
+                            )
+                        )
+                        density_embedding_scope = str(
+                            self.config.reward_model.reward_kwargs.get(
+                                "density_embedding_scope", "response_mean_pool"
+                            )
+                        )
+                        batch.meta_info["return_response_embeddings"] = use_response_embeddings
                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
                         entropys = old_log_prob.batch["entropys"]
                         response_masks = batch.batch["response_mask"]
@@ -1332,6 +1669,57 @@ class RayPPOTrainer:
                         metrics.update(old_log_prob_metrics)
                         #old_log_prob.batch.pop("entropys")
                         batch = batch.union(old_log_prob)
+                        if use_density_embeddings:
+                            evidence_scopes = {
+                                "evidence_query_mean_pool",
+                                "canonical_evidence_query_mean_pool",
+                                "canonical_option_query_mean_pool",
+                            }
+                            metrics["train/density_embedding_scope_evidence"] = float(
+                                density_embedding_scope in {"evidence_query_mean_pool", "canonical_evidence_query_mean_pool"}
+                            )
+                            metrics["train/density_embedding_scope_canonical"] = float(
+                                density_embedding_scope in {"canonical_evidence_query_mean_pool", "canonical_option_query_mean_pool"}
+                            )
+                            metrics["train/density_embedding_scope_option_only"] = float(
+                                density_embedding_scope == "canonical_option_query_mean_pool"
+                            )
+                            if density_embedding_scope in evidence_scopes:
+                                canonicalize_evidence = density_embedding_scope in {
+                                    "canonical_evidence_query_mean_pool",
+                                    "canonical_option_query_mean_pool",
+                                }
+                                if density_embedding_scope == "canonical_option_query_mean_pool":
+                                    default_evidence_template = _DENSITY_CANONICAL_OPTION_DEFAULT_TEMPLATE
+                                elif canonicalize_evidence:
+                                    default_evidence_template = _DENSITY_CANONICAL_EVIDENCE_DEFAULT_TEMPLATE
+                                else:
+                                    default_evidence_template = _DENSITY_EVIDENCE_DEFAULT_TEMPLATE
+                                evidence_template = self.config.reward_model.reward_kwargs.get(
+                                    "density_evidence_template", default_evidence_template
+                                )
+                                evidence_batch, evidence_queries, evidence_token_lengths = _build_density_evidence_query_batch(
+                                    batch=batch,
+                                    tokenizer=self.tokenizer,
+                                    template=evidence_template,
+                                    canonicalize=canonicalize_evidence,
+                                )
+                                evidence_log_prob = self.actor_rollout_wg.compute_log_prob(evidence_batch)
+                                batch.batch["response_embeddings"] = evidence_log_prob.batch["response_embeddings"]
+                                batch.non_tensor_batch["density_evidence_query"] = np.array(evidence_queries, dtype=object)
+                                if evidence_token_lengths:
+                                    metrics["train/density_evidence_query_token_mean"] = float(
+                                        np.mean(evidence_token_lengths)
+                                    )
+                                    metrics["train/density_evidence_query_token_max"] = float(
+                                        np.max(evidence_token_lengths)
+                                    )
+                            elif density_embedding_scope in {"response_mean_pool", "full_response_mean_pool"}:
+                                batch.non_tensor_batch["density_evidence_query"] = np.array(
+                                    [""] * len(batch), dtype=object
+                                )
+                            else:
+                                raise ValueError(f"Unsupported density_embedding_scope={density_embedding_scope}")
 
                     if self.use_reference_policy:
                         # compute reference log_prob
@@ -1369,7 +1757,9 @@ class RayPPOTrainer:
                                     metrics.update({f"train/{k}": v})
                                 
                                 # Down Sampling
-                                batch = self._select_top_k_per_prompt(batch, self.n_votes_per_prompt, self.n_samples_per_prompt)
+                                batch = self._select_top_k_per_prompt(
+                                    batch, self.n_votes_per_prompt, self.n_samples_per_prompt
+                                )
                                 self.config.actor_rollout_ref.rollout.n = self.n_samples_per_prompt
 
                                 # Recompute ttrl metrics
@@ -1390,8 +1780,56 @@ class RayPPOTrainer:
 
                         batch.batch["token_level_scores"] = reward_tensor
 
+                        if (
+                            self.config.actor_rollout_ref.actor.get("use_papo_prcp_loss", False)
+                            and self.config.actor_rollout_ref.actor.get("papo_valid_only", False)
+                        ):
+                            response_mask = batch.batch.get("response_mask")
+                            if response_mask is None:
+                                response_mask = batch.batch["attention_mask"][:, -reward_tensor.size(-1):]
+                            valid_response = reward_tensor.detach().abs().sum(dim=-1) > 1e-8
+                            batch.batch["papo_valid_response_mask"] = (
+                                response_mask * valid_response.to(response_mask.dtype).unsqueeze(-1)
+                            )
+                            metrics["train/papo_valid_response_ratio"] = float(
+                                valid_response.float().mean().detach().item()
+                            )
+
                         if self.use_ttrl:
                             self._balance_batch(batch, metrics=metrics)
+
+                        if self.config.actor_rollout_ref.actor.get("use_papo_prcp_loss", False):
+                            with _timer("papo_aug_log_prob", timing_raw):
+                                papo_masked_inputs, papo_mask_metadata = _build_papo_masked_multi_modal_inputs(
+                                    batch=batch,
+                                    processor=self.processor,
+                                    patch_size=self.config.data.get("papo_mask_patch_size", 14),
+                                    black_prob=self.config.data.get("papo_mask_prob", 0.6),
+                                    global_step=self.global_steps,
+                                    mask_type=self.config.data.get("papo_mask_type", "black"),
+                                )
+                                papo_aug_batch = batch.select(
+                                    batch_keys=["responses", "input_ids", "attention_mask", "position_ids"],
+                                    non_tensor_batch_keys=["multi_modal_inputs"],
+                                )
+                                papo_aug_batch.non_tensor_batch["multi_modal_inputs"] = papo_masked_inputs
+                                papo_aug_batch.meta_info = deepcopy(batch.meta_info)
+                                papo_aug_batch.meta_info["return_response_embeddings"] = False
+                                aug_log_prob = self.actor_rollout_wg.compute_log_prob(papo_aug_batch)
+                                batch.batch["aug_log_probs"] = aug_log_prob.batch["old_log_probs"]
+                                mask_ratios = []
+                                for metadata in papo_mask_metadata:
+                                    if isinstance(metadata, dict):
+                                        mask_ratios.append(metadata.get("papo_mask_blackened_ratio", 0.0))
+                                if mask_ratios:
+                                    metrics["train/papo_mask_blackened_ratio"] = float(np.mean(mask_ratios))
+                                metrics["train/papo_aug_log_prob_mean"] = float(
+                                    agg_loss(
+                                        loss_mat=aug_log_prob.batch["old_log_probs"],
+                                        loss_mask=batch.batch["response_mask"],
+                                        loss_agg_mode=loss_agg_mode,
+                                    ).detach().item()
+                                )
 
                         print(f"{list(reward_extra_infos_dict.keys())=}")
                         if reward_extra_infos_dict:

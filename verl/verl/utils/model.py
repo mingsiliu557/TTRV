@@ -354,7 +354,14 @@ def load_megatron_model_weights(
 
     print(f"before weight loader: architectures = {architectures}...")
     for arch in architectures:
-        print(f"call weight loader arch = {arch}, model config = {model.config}")
+        config_summary = {
+            "model_type": getattr(model.config, "model_type", None),
+            "architectures": getattr(model.config, "architectures", None),
+            "hidden_size": getattr(model.config, "hidden_size", None),
+            "vocab_size": getattr(model.config, "vocab_size", None),
+            "torch_dtype": str(getattr(model.config, "torch_dtype", None)),
+        }
+        print(f"call weight loader arch = {arch}, model config = {config_summary}")
         weight_loader = get_weight_loader(arch)
         weight_loader(
             state_dict=state_dict,

@@ -5,6 +5,7 @@ from sympy import simplify
 from sympy.parsing.sympy_parser import parse_expr
 from tqdm import tqdm
 
+from verl.utils.reward_score.ttrl.direct_answer import extract_direct_answer
 from verl.utils.reward_score.ttrl.qwen.qwen_math_parser import extract_answer
 
 
@@ -13,6 +14,8 @@ def auto_extract(task, all_outputs, extra_info=None):
         "math": partial(extract_answer, data_name=task),
         "gpqa": partial(extract_answer, data_name=task),
         "bbox": partial(extract_answer, data_name=task),
+        "vqa_da": extract_direct_answer,
+        "ocr": extract_direct_answer,
     }
     assert task in task2extract_fn, f"{task} not in {list(task2extract_fn.keys())}"
     extract_fn = task2extract_fn[task]

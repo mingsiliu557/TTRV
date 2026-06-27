@@ -199,8 +199,16 @@ class TaskRunner:
 
         # Note that we always use function-based RM for validation
         if reward_manager_name == "ttrl":
+            val_reward_kwargs = dict(reward_kwargs)
+            val_reward_kwargs["mode"] = "eval"
+            val_num_examine = int(config.reward_model.get("val_num_examine", os.environ.get("TTRL_VAL_NUM_EXAMINE", 0)))
             val_reward_fn = reward_manager_cls(
-                tokenizer=tokenizer, num_examine=1, compute_score=compute_score, reward_fn_key=config.data.reward_fn_key, eval_n_samples=config.actor_rollout_ref.rollout.val_kwargs.n
+                tokenizer=tokenizer,
+                num_examine=val_num_examine,
+                compute_score=compute_score,
+                reward_fn_key=config.data.reward_fn_key,
+                eval_n_samples=config.actor_rollout_ref.rollout.val_kwargs.n,
+                **val_reward_kwargs,
             )
         else:
             val_reward_fn = reward_manager_cls(
