@@ -18,6 +18,7 @@ This trainer supports model-agonistic model initialization with huggingface
 
 import os
 import hashlib
+import json
 import random
 import re
 import uuid
@@ -27,7 +28,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from pprint import pprint
-from typing import Dict, Type
+from typing import Any, Dict, Optional, Type
 
 import numpy as np
 import ray
@@ -419,20 +420,7 @@ def _build_density_evidence_query_batch(
     return evidence_batch, evidence_queries, evidence_token_lengths
 
 
-def _random_patch_papo_perturbation(
-    image,
-    patch_size: int,
-    mask_prob: float,
-    seed: int,
-    mask_type: str = "black",
-):
-    from PIL import ImageDraw, ImageFilter
-
-    if patch_size <= 0:
-        raise ValueError(f"patch_size must be positive, got {patch_size}")
-    if not (0.0 <= mask_prob <= 1.0):
-        raise ValueError(f"mask_prob must be in [0, 1], got {mask_prob}")
-
+def _canonical_papo_mask_type(mask_type: str) -> str:
     mask_type = str(mask_type or "black").lower().strip()
     aliases = {
         "random_patch_blackening": "black",
@@ -446,7 +434,26 @@ def _random_patch_papo_perturbation(
     }
     if mask_type not in aliases:
         raise ValueError(f"Unsupported PAPO mask_type={mask_type!r}; expected one of {sorted(aliases)}")
-    mask_type = aliases[mask_type]
+    return aliases[mask_type]
+
+
+def _random_patch_papo_perturbation(
+    image,
+    patch_size: int,
+    mask_prob: float,
+    seed: int,
+    mask_type: str = "black",
+):
+    from PIL import ImageDraw, ImageFilter
+
+    patch_size = int(patch_size)
+    mask_prob = float(mask_prob)
+    if patch_size <= 0:
+        raise ValueError(f"patch_size must be positive, got {patch_size}")
+    if not (0.0 <= mask_prob <= 1.0):
+        raise ValueError(f"mask_prob must be in [0, 1], got {mask_prob}")
+
+    mask_type = _canonical_papo_mask_type(mask_type)
 
     image = image.convert("RGB").copy()
     width, height = image.size
@@ -474,18 +481,22 @@ def _random_patch_papo_perturbation(
 
     perturbed_ratio = perturbed_patches / total_patches if total_patches else 0.0
     metadata = {
+        "papo_mask_strategy": "random",
         "papo_mask_type": f"random_patch_{mask_type}",
         "papo_mask_patch_size": patch_size,
         "papo_mask_prob": mask_prob,
         "papo_mask_total_patches": total_patches,
         "papo_mask_perturbed_patches": perturbed_patches,
         "papo_mask_perturbed_ratio": perturbed_ratio,
+        "papo_masked_fraction": perturbed_ratio,
+        "papo_grounding_used": False,
+        "papo_fallback": False,
+        "papo_grounding_missing": False,
         # Kept for backward-compatible metrics and scripts.
         "papo_mask_blackened_patches": perturbed_patches,
         "papo_mask_blackened_ratio": perturbed_ratio,
     }
     return image, metadata
-
 
 def _random_patch_blackening(image, patch_size: int, black_prob: float, seed: int):
     return _random_patch_papo_perturbation(
@@ -495,6 +506,424 @@ def _random_patch_blackening(image, patch_size: int, black_prob: float, seed: in
         seed=seed,
         mask_type="black",
     )
+
+
+def _jsonable_scalar(value):
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _safe_sample_value(values, sample_i: int, default=None):
+    if values is None:
+        return default
+    try:
+        return _jsonable_scalar(values[sample_i])
+    except Exception:
+        return default
+
+
+def _truthy_config_value(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y"}
+    return bool(value)
+
+
+def _grounding_key_from_parts(data_source, index, extra_info=None) -> Optional[str]:
+    if index is None and isinstance(extra_info, dict):
+        index = extra_info.get("index")
+    data_source = _jsonable_scalar(data_source)
+    index = _jsonable_scalar(index)
+    if data_source is None or index is None:
+        return None
+    return f"{data_source}::{index}"
+
+
+def _grounding_key_from_record(record: dict[str, Any]) -> Optional[str]:
+    key = record.get("grounding_key")
+    if key:
+        return str(key)
+    extra_info = record.get("extra_info") if isinstance(record.get("extra_info"), dict) else None
+    return _grounding_key_from_parts(record.get("data_source"), record.get("index"), extra_info=extra_info)
+
+
+def _load_papo_grounding_table(path: str) -> dict[str, dict[str, Any]]:
+    if path is None or str(path).strip() == "":
+        return {}
+    path = os.path.expanduser(str(path))
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"PAPO grounding file not found: {path}")
+
+    records = []
+    if path.endswith(".json"):
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        if isinstance(payload, dict) and "records" in payload:
+            records = payload["records"]
+        elif isinstance(payload, dict):
+            records = [dict(value, grounding_key=key) for key, value in payload.items() if isinstance(value, dict)]
+        elif isinstance(payload, list):
+            records = payload
+        else:
+            raise ValueError(f"Unsupported PAPO grounding JSON payload in {path}")
+    else:
+        with open(path, "r", encoding="utf-8") as f:
+            for line_no, line in enumerate(f, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"Invalid JSONL in {path}:{line_no}: {exc}") from exc
+
+    table: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        key = _grounding_key_from_record(record)
+        if key is None:
+            continue
+        table[key] = record
+    return table
+
+
+def _is_number_like(value) -> bool:
+    try:
+        float(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_whole_image_sentinel(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().upper() == "WHOLE_IMAGE"
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        return _is_whole_image_sentinel(value[0])
+    return False
+
+
+def _coerce_grounding_boxes(raw_boxes):
+    if isinstance(raw_boxes, np.ndarray):
+        raw_boxes = raw_boxes.tolist()
+    if _is_whole_image_sentinel(raw_boxes):
+        return "WHOLE_IMAGE"
+    if raw_boxes is None:
+        return []
+    if isinstance(raw_boxes, dict):
+        raw_boxes = raw_boxes.get("boxes_norm", raw_boxes.get("box_norm", raw_boxes.get("boxes", raw_boxes.get("bbox"))))
+        if isinstance(raw_boxes, np.ndarray):
+            raw_boxes = raw_boxes.tolist()
+        if _is_whole_image_sentinel(raw_boxes):
+            return "WHOLE_IMAGE"
+    if not isinstance(raw_boxes, (list, tuple)):
+        return []
+
+    candidates = []
+    if len(raw_boxes) == 4 and all(_is_number_like(value) for value in raw_boxes):
+        candidates = [raw_boxes]
+    else:
+        for item in raw_boxes:
+            if isinstance(item, np.ndarray):
+                item = item.tolist()
+            if _is_whole_image_sentinel(item):
+                return "WHOLE_IMAGE"
+            if isinstance(item, dict):
+                item = item.get("box_norm", item.get("boxes_norm", item.get("box", item.get("bbox"))))
+            if isinstance(item, np.ndarray):
+                item = item.tolist()
+            if isinstance(item, (list, tuple)) and len(item) == 4 and all(_is_number_like(value) for value in item):
+                candidates.append(item)
+
+    boxes = []
+    for candidate in candidates:
+        x0, y0, x1, y1 = [float(value) for value in candidate]
+        if max(x0, y0, x1, y1) > 1.0 + 1e-6 or min(x0, y0, x1, y1) < -1e-6:
+            continue
+        x0, x1 = sorted((max(0.0, min(1.0, x0)), max(0.0, min(1.0, x1))))
+        y0, y1 = sorted((max(0.0, min(1.0, y0)), max(0.0, min(1.0, y1))))
+        if x1 > x0 and y1 > y0:
+            boxes.append([x0, y0, x1, y1])
+    return boxes
+
+
+def _select_grounding_boxes_for_image(record: dict[str, Any], image_i: int):
+    if "boxes_by_image" in record:
+        raw_boxes = record["boxes_by_image"]
+        if isinstance(raw_boxes, dict):
+            raw_boxes = raw_boxes.get(str(image_i), raw_boxes.get(image_i, raw_boxes.get(f"image_{image_i}")))
+        elif isinstance(raw_boxes, (list, tuple)) and image_i < len(raw_boxes):
+            raw_boxes = raw_boxes[image_i]
+        else:
+            raw_boxes = None
+    else:
+        raw_boxes = record.get("boxes_norm", record.get("boxes"))
+        if isinstance(raw_boxes, dict):
+            raw_boxes = raw_boxes.get(str(image_i), raw_boxes.get(image_i, raw_boxes.get(f"image_{image_i}", raw_boxes)))
+    return _coerce_grounding_boxes(raw_boxes)
+
+
+def _confidence_is_low(confidence) -> bool:
+    if confidence is None or confidence == "":
+        return False
+    if isinstance(confidence, np.ndarray):
+        confidence = confidence.tolist()
+    if isinstance(confidence, dict):
+        confidence = list(confidence.values())
+    if isinstance(confidence, (list, tuple)):
+        numeric_values = [float(value) for value in confidence if _is_number_like(value)]
+        return bool(numeric_values) and max(numeric_values) <= 0.0
+    return _is_number_like(confidence) and float(confidence) <= 0.0
+
+
+def _grounding_record_fallback_reason(record: Optional[dict[str, Any]]) -> Optional[str]:
+    if record is None:
+        return "missing_key"
+    if _truthy_config_value(record.get("audit_disabled", False)):
+        return "audit_disabled"
+    if _truthy_config_value(record.get("fallback", False)):
+        return str(record.get("fallback_reason") or "record_fallback")
+    if _confidence_is_low(record.get("confidence")):
+        return "low_confidence"
+    return None
+
+
+def _dilate_norm_box(box, box_dilate: float):
+    x0, y0, x1, y1 = box
+    if box_dilate <= 0:
+        return [x0, y0, x1, y1]
+    width = x1 - x0
+    height = y1 - y0
+    dx = width * box_dilate
+    dy = height * box_dilate
+    return [max(0.0, x0 - dx), max(0.0, y0 - dy), min(1.0, x1 + dx), min(1.0, y1 + dy)]
+
+
+def _boxes_to_pil_mask(image_size, boxes_norm, box_dilate: float):
+    from PIL import Image, ImageDraw
+
+    width, height = image_size
+    mask = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(mask)
+    for box in boxes_norm:
+        x0, y0, x1, y1 = _dilate_norm_box(box, box_dilate)
+        left = max(0, min(width, int(np.floor(x0 * width))))
+        top = max(0, min(height, int(np.floor(y0 * height))))
+        right = max(0, min(width, int(np.ceil(x1 * width))))
+        bottom = max(0, min(height, int(np.ceil(y1 * height))))
+        if right > left and bottom > top:
+            draw.rectangle((left, top, right - 1, bottom - 1), fill=255)
+    masked_fraction = float(np.asarray(mask, dtype=np.uint8).mean() / 255.0) if width and height else 0.0
+    return mask, masked_fraction
+
+
+def _apply_papo_mask_to_regions(image, region_mask, mask_type: str, blur_radius: float):
+    from PIL import Image, ImageFilter
+
+    mask_type = _canonical_papo_mask_type(mask_type)
+    image = image.convert("RGB").copy()
+    if region_mask.getbbox() is None:
+        return image
+    if mask_type == "black":
+        image.paste(Image.new("RGB", image.size, (0, 0, 0)), (0, 0), region_mask)
+    elif mask_type == "gray":
+        image.paste(Image.new("RGB", image.size, (127, 127, 127)), (0, 0), region_mask)
+    elif mask_type == "blur":
+        image.paste(image.filter(ImageFilter.GaussianBlur(radius=blur_radius)), (0, 0), region_mask)
+    return image
+
+
+def _sample_patch_mask_inside_region(image_size, region_mask, patch_size: int, mask_prob: float, seed: int):
+    from PIL import Image, ImageChops, ImageDraw
+
+    patch_size = int(patch_size)
+    mask_prob = float(mask_prob)
+    if patch_size <= 0:
+        raise ValueError(f"patch_size must be positive, got {patch_size}")
+    if not (0.0 <= mask_prob <= 1.0):
+        raise ValueError(f"mask_prob must be in [0, 1], got {mask_prob}")
+
+    width, height = image_size
+    region_arr = np.asarray(region_mask, dtype=np.uint8)
+    patch_boxes = []
+    total_patches = 0
+    for top in range(0, height, patch_size):
+        for left in range(0, width, patch_size):
+            total_patches += 1
+            right = min(width, left + patch_size)
+            bottom = min(height, top + patch_size)
+            if region_arr[top:bottom, left:right].max(initial=0) > 0:
+                patch_boxes.append((left, top, right, bottom))
+
+    selected_patch_count = int(round(mask_prob * len(patch_boxes)))
+    selected_patch_count = max(0, min(len(patch_boxes), selected_patch_count))
+    rng = random.Random(seed)
+    selected_patch_boxes = list(patch_boxes)
+    rng.shuffle(selected_patch_boxes)
+    selected_patch_boxes = selected_patch_boxes[:selected_patch_count]
+
+    patch_mask = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(patch_mask)
+    for left, top, right, bottom in selected_patch_boxes:
+        draw.rectangle((left, top, right - 1, bottom - 1), fill=255)
+
+    sampled_region_mask = ImageChops.multiply(region_mask, patch_mask)
+    masked_fraction = float(np.asarray(sampled_region_mask, dtype=np.uint8).mean() / 255.0) if width and height else 0.0
+    region_fraction = float(region_arr.mean() / 255.0) if width and height else 0.0
+    return sampled_region_mask, {
+        "papo_mask_patch_size": patch_size,
+        "papo_mask_prob": mask_prob,
+        "papo_mask_total_patches": total_patches,
+        "papo_grounding_region_patch_count": len(patch_boxes),
+        "papo_mask_perturbed_patches": selected_patch_count,
+        "papo_mask_total_patch_ratio": selected_patch_count / total_patches if total_patches else 0.0,
+        "papo_mask_region_patch_ratio": selected_patch_count / len(patch_boxes) if patch_boxes else 0.0,
+        "papo_grounding_region_fraction": region_fraction,
+        "papo_masked_fraction": masked_fraction,
+        "papo_masked_fraction_in_grounding": masked_fraction / region_fraction if region_fraction > 0.0 else 0.0,
+        # Kept for the existing logger name. For region-random masks this is the
+        # selected patch ratio over the full image grid, not the pixel fraction.
+        "papo_mask_blackened_ratio": selected_patch_count / total_patches if total_patches else 0.0,
+    }
+
+
+def _grounding_box_papo_perturbation(
+    image,
+    boxes_norm,
+    grounding_direction: str = "evidence",
+    box_dilate: float = 0.0,
+    mask_type: str = "black",
+    region_patch_sample: bool = False,
+    patch_size: int = 14,
+    mask_prob: float = 0.6,
+    seed: int = 0,
+):
+    from PIL import ImageChops
+
+    grounding_direction = str(grounding_direction or "evidence").lower().strip()
+    if grounding_direction not in {"evidence", "context"}:
+        raise ValueError("PAPO_GROUNDING_DIRECTION must be 'evidence' or 'context'")
+    box_dilate = float(box_dilate)
+    if box_dilate < 0.0:
+        raise ValueError(f"PAPO_GROUNDING_BOX_DILATE must be non-negative, got {box_dilate}")
+
+    image = image.convert("RGB")
+    box_mask, box_fraction = _boxes_to_pil_mask(image.size, boxes_norm, box_dilate=box_dilate)
+    if grounding_direction == "evidence":
+        active_mask = box_mask
+        masked_fraction = box_fraction
+    else:
+        active_mask = ImageChops.invert(box_mask)
+        masked_fraction = 1.0 - box_fraction
+
+    mask_type = _canonical_papo_mask_type(mask_type)
+    blur_radius = max(1.0, min(image.size) / 32.0)
+    patch_metadata = {}
+    if region_patch_sample:
+        active_mask, patch_metadata = _sample_patch_mask_inside_region(
+            image_size=image.size,
+            region_mask=active_mask,
+            patch_size=patch_size,
+            mask_prob=mask_prob,
+            seed=seed,
+        )
+        masked_fraction = patch_metadata["papo_masked_fraction"]
+    masked_image = _apply_papo_mask_to_regions(image, active_mask, mask_type=mask_type, blur_radius=blur_radius)
+    metadata = {
+        "papo_mask_strategy": "grounding_region_random" if region_patch_sample else "grounding",
+        "papo_mask_type": (
+            f"grounding_{grounding_direction}_patch_{mask_type}"
+            if region_patch_sample
+            else f"grounding_{grounding_direction}_{mask_type}"
+        ),
+        "papo_grounding_direction": grounding_direction,
+        "papo_grounding_box_count": len(boxes_norm),
+        "papo_grounding_box_dilate": box_dilate,
+        "papo_grounding_box_fraction": box_fraction,
+        "papo_masked_fraction": masked_fraction,
+        "papo_grounding_used": True,
+        "papo_fallback": False,
+        "papo_grounding_missing": False,
+    }
+    metadata.update(patch_metadata)
+    return masked_image, metadata
+
+
+def _resolution_papo_perturbation(image, downscale: float = 0.25):
+    from PIL import Image
+
+    downscale = float(downscale)
+    if not (0.0 < downscale <= 1.0):
+        raise ValueError(f"PAPO_FALLBACK_DOWNSCALE must be in (0, 1], got {downscale}")
+    image = image.convert("RGB")
+    width, height = image.size
+    resampling = getattr(getattr(Image, "Resampling", Image), "BICUBIC")
+    low_size = (max(1, int(round(width * downscale))), max(1, int(round(height * downscale))))
+    masked_image = image.resize(low_size, resampling).resize((width, height), resampling)
+    metadata = {
+        "papo_mask_type": "resolution_downscale",
+        "papo_fallback_mask": "resolution",
+        "papo_fallback_downscale": downscale,
+        "papo_masked_fraction": 1.0,
+    }
+    return masked_image, metadata
+
+
+def _papo_grounding_fallback_perturbation(
+    image,
+    fallback_reason: str,
+    fallback_mask: str,
+    fallback_downscale: float,
+    patch_size: int,
+    mask_prob: float,
+    seed: int,
+    mask_type: str,
+    grounding_key: Optional[str],
+):
+    fallback_mask = str(fallback_mask or "resolution").lower().strip()
+    if fallback_mask == "resolution":
+        masked_image, metadata = _resolution_papo_perturbation(image, downscale=fallback_downscale)
+    elif fallback_mask == "random":
+        masked_image, metadata = _random_patch_papo_perturbation(
+            image,
+            patch_size=patch_size,
+            mask_prob=mask_prob,
+            seed=seed,
+            mask_type=mask_type,
+        )
+        metadata["papo_fallback_mask"] = "random"
+    else:
+        raise ValueError("PAPO_FALLBACK_MASK must be 'resolution' or 'random'")
+
+    metadata.update(
+        {
+            "papo_mask_strategy": "grounding",
+            "papo_grounding_key": grounding_key,
+            "papo_grounding_used": False,
+            "papo_fallback": True,
+            "papo_fallback_reason": str(fallback_reason),
+            "papo_grounding_missing": str(fallback_reason) in {"missing_key", "missing_batch_key"},
+        }
+    )
+    metadata.setdefault("papo_masked_fraction", metadata.get("papo_mask_perturbed_ratio", 0.0))
+    return masked_image, metadata
+
+
+def _iter_papo_mask_metadata(metadata_batch):
+    for sample_metadata in metadata_batch:
+        if isinstance(sample_metadata, dict):
+            yield sample_metadata
+        elif isinstance(sample_metadata, np.ndarray):
+            for item in sample_metadata.tolist():
+                if isinstance(item, dict):
+                    yield item
+        elif isinstance(sample_metadata, (list, tuple)):
+            for item in sample_metadata:
+                if isinstance(item, dict):
+                    yield item
 
 
 def _processor_prompt_for_masked_branch(prompt: str) -> str:
@@ -509,6 +938,12 @@ def _build_papo_masked_multi_modal_inputs(
     black_prob: float,
     global_step: int,
     mask_type: str = "black",
+    strategy: str = "random",
+    grounding_table: Optional[dict[str, dict[str, Any]]] = None,
+    grounding_direction: str = "evidence",
+    box_dilate: float = 0.0,
+    fallback_mask: str = "resolution",
+    fallback_downscale: float = 0.25,
 ):
     if processor is None:
         raise ValueError("PAPO perception loss requires a multimodal processor")
@@ -517,25 +952,101 @@ def _build_papo_masked_multi_modal_inputs(
     if "full_prompts" not in batch.non_tensor_batch:
         raise ValueError("PAPO perception loss requires data.return_full_prompt=True")
 
+    strategy = str(strategy or "random").lower().strip()
+    grounding_strategies = {"grounding", "grounding_region_random", "grounding_patch_sample"}
+    if strategy not in {"random", *grounding_strategies}:
+        raise ValueError(
+            "PAPO_MASK_STRATEGY must be 'random', 'grounding', "
+            "'grounding_region_random', or 'grounding_patch_sample'"
+        )
+    patch_size = int(patch_size)
+    black_prob = float(black_prob)
+    box_dilate = float(box_dilate)
+    fallback_downscale = float(fallback_downscale)
+    grounding_table = grounding_table or {}
+
     masked_inputs = []
     masked_metadata = []
     full_prompts = batch.non_tensor_batch["full_prompts"]
     multi_modal_data_batch = batch.non_tensor_batch["multi_modal_data"]
+    data_sources = batch.non_tensor_batch.get("data_source")
+    indexes = batch.non_tensor_batch.get("index")
+    extra_infos = batch.non_tensor_batch.get("extra_info")
 
     for sample_i, (prompt, multi_modal_data) in enumerate(zip(full_prompts, multi_modal_data_batch)):
         if not isinstance(multi_modal_data, dict) or "image" not in multi_modal_data:
             raise ValueError("PAPO perception loss currently supports image multimodal data only")
 
+        grounding_key = None
+        grounding_record = None
+        grounding_record_reason = None
+        sample_data_source = None
+        sample_index = None
+        if strategy in grounding_strategies:
+            sample_data_source = _safe_sample_value(data_sources, sample_i)
+            sample_index = _safe_sample_value(indexes, sample_i)
+            sample_extra_info = _safe_sample_value(extra_infos, sample_i)
+            grounding_key = _grounding_key_from_parts(sample_data_source, sample_index, extra_info=sample_extra_info)
+            if grounding_key is None:
+                grounding_record_reason = "missing_batch_key"
+            else:
+                grounding_record = grounding_table.get(grounding_key)
+                grounding_record_reason = _grounding_record_fallback_reason(grounding_record)
+
         masked_images = []
         sample_metadata = []
         for image_i, image in enumerate(multi_modal_data["image"]):
-            masked_image, metadata = _random_patch_papo_perturbation(
-                image,
-                patch_size=patch_size,
-                mask_prob=black_prob,
-                seed=_harmony_seed(global_step, sample_i, image_i),
-                mask_type=mask_type,
-            )
+            seed = _harmony_seed(global_step, sample_i, image_i)
+            if strategy == "random":
+                masked_image, metadata = _random_patch_papo_perturbation(
+                    image,
+                    patch_size=patch_size,
+                    mask_prob=black_prob,
+                    seed=seed,
+                    mask_type=mask_type,
+                )
+            else:
+                fallback_reason = grounding_record_reason
+                boxes_norm = []
+                if fallback_reason is None:
+                    boxes_norm = _select_grounding_boxes_for_image(grounding_record, image_i)
+                    if boxes_norm == "WHOLE_IMAGE":
+                        fallback_reason = "whole_image"
+                    elif not boxes_norm:
+                        fallback_reason = "no_boxes"
+
+                if fallback_reason is not None:
+                    masked_image, metadata = _papo_grounding_fallback_perturbation(
+                        image,
+                        fallback_reason=fallback_reason,
+                        fallback_mask=fallback_mask,
+                        fallback_downscale=fallback_downscale,
+                        patch_size=patch_size,
+                        mask_prob=black_prob,
+                        seed=seed,
+                        mask_type=mask_type,
+                        grounding_key=grounding_key,
+                    )
+                else:
+                    masked_image, metadata = _grounding_box_papo_perturbation(
+                        image,
+                        boxes_norm=boxes_norm,
+                        grounding_direction=grounding_direction,
+                        box_dilate=box_dilate,
+                        mask_type=mask_type,
+                        region_patch_sample=strategy in {"grounding_region_random", "grounding_patch_sample"},
+                        patch_size=patch_size,
+                        mask_prob=black_prob,
+                        seed=seed,
+                    )
+                    metadata.update(
+                        {
+                            "papo_grounding_key": grounding_key,
+                            "papo_grounding_data_source": sample_data_source,
+                            "papo_grounding_index": sample_index,
+                            "papo_grounding_confidence": grounding_record.get("confidence"),
+                        }
+                    )
             masked_images.append(masked_image)
             sample_metadata.append(metadata)
 
@@ -790,6 +1301,8 @@ class RayPPOTrainer:
         self.use_rm = Role.RewardModel in role_worker_mapping
         self.ray_worker_group_cls = ray_worker_group_cls
         self.validation_generations_logger = ValidationGenerationsLogger()
+        self._papo_grounding_table = None
+        self._papo_grounding_table_path = None
 
         # define in-reward KL control
         # kl loss control currently not suppoorted
@@ -818,6 +1331,17 @@ class RayPPOTrainer:
 
         self._validate_config()
         self._create_dataloader()
+
+    def _get_papo_grounding_table(self):
+        grounding_file = self.config.data.get("papo_grounding_file", None)
+        if grounding_file is None or str(grounding_file).strip() == "":
+            return {}
+        grounding_file = os.path.expanduser(str(grounding_file))
+        if self._papo_grounding_table is None or self._papo_grounding_table_path != grounding_file:
+            self._papo_grounding_table = _load_papo_grounding_table(grounding_file)
+            self._papo_grounding_table_path = grounding_file
+            print(f"[papo] loaded {len(self._papo_grounding_table)} grounding records from {grounding_file}")
+        return self._papo_grounding_table
 
     def _validate_config(self):
         config = self.config
@@ -950,6 +1474,19 @@ class RayPPOTrainer:
             assert config.actor_rollout_ref.rollout.temperature > 0, (
                 "validation gen temperature should be greater than 0 when enabling do_sample"
             )
+
+        papo_mask_strategy = str(config.data.get("papo_mask_strategy", "random") or "random").lower().strip()
+        if papo_mask_strategy not in {"random", "grounding", "grounding_region_random", "grounding_patch_sample"}:
+            raise ValueError(
+                "data.papo_mask_strategy must be 'random', 'grounding', "
+                "'grounding_region_random', or 'grounding_patch_sample'"
+            )
+        papo_grounding_direction = str(config.data.get("papo_grounding_direction", "evidence") or "evidence").lower().strip()
+        if papo_grounding_direction not in {"evidence", "context"}:
+            raise ValueError("data.papo_grounding_direction must be 'evidence' or 'context'")
+        papo_fallback_mask = str(config.data.get("papo_fallback_mask", "resolution") or "resolution").lower().strip()
+        if papo_fallback_mask not in {"resolution", "random"}:
+            raise ValueError("data.papo_fallback_mask must be 'resolution' or 'random'")
 
         print("[validate_config] All configuration checks passed successfully!")
 
@@ -1800,6 +2337,13 @@ class RayPPOTrainer:
 
                         if self.config.actor_rollout_ref.actor.get("use_papo_prcp_loss", False):
                             with _timer("papo_aug_log_prob", timing_raw):
+                                papo_mask_strategy = self.config.data.get("papo_mask_strategy", "random")
+                                papo_grounding_table = (
+                                    self._get_papo_grounding_table()
+                                    if str(papo_mask_strategy or "random").lower().strip()
+                                    in {"grounding", "grounding_region_random", "grounding_patch_sample"}
+                                    else None
+                                )
                                 papo_masked_inputs, papo_mask_metadata = _build_papo_masked_multi_modal_inputs(
                                     batch=batch,
                                     processor=self.processor,
@@ -1807,22 +2351,120 @@ class RayPPOTrainer:
                                     black_prob=self.config.data.get("papo_mask_prob", 0.6),
                                     global_step=self.global_steps,
                                     mask_type=self.config.data.get("papo_mask_type", "black"),
+                                    strategy=papo_mask_strategy,
+                                    grounding_table=papo_grounding_table,
+                                    grounding_direction=self.config.data.get("papo_grounding_direction", "evidence"),
+                                    box_dilate=self.config.data.get("papo_grounding_box_dilate", 0.0),
+                                    fallback_mask=self.config.data.get("papo_fallback_mask", "resolution"),
+                                    fallback_downscale=self.config.data.get("papo_fallback_downscale", 0.25),
                                 )
+                                papo_non_tensor_keys = ["multi_modal_inputs"]
+                                for key in ["data_source", "index", "extra_info"]:
+                                    if key in batch.non_tensor_batch:
+                                        papo_non_tensor_keys.append(key)
                                 papo_aug_batch = batch.select(
                                     batch_keys=["responses", "input_ids", "attention_mask", "position_ids"],
-                                    non_tensor_batch_keys=["multi_modal_inputs"],
+                                    non_tensor_batch_keys=papo_non_tensor_keys,
                                 )
                                 papo_aug_batch.non_tensor_batch["multi_modal_inputs"] = papo_masked_inputs
                                 papo_aug_batch.meta_info = deepcopy(batch.meta_info)
                                 papo_aug_batch.meta_info["return_response_embeddings"] = False
                                 aug_log_prob = self.actor_rollout_wg.compute_log_prob(papo_aug_batch)
                                 batch.batch["aug_log_probs"] = aug_log_prob.batch["old_log_probs"]
-                                mask_ratios = []
-                                for metadata in papo_mask_metadata:
-                                    if isinstance(metadata, dict):
-                                        mask_ratios.append(metadata.get("papo_mask_blackened_ratio", 0.0))
+
+                                metadata_rows = list(_iter_papo_mask_metadata(papo_mask_metadata))
+                                mask_ratios = [
+                                    metadata["papo_mask_blackened_ratio"]
+                                    for metadata in metadata_rows
+                                    if "papo_mask_blackened_ratio" in metadata
+                                ]
                                 if mask_ratios:
                                     metrics["train/papo_mask_blackened_ratio"] = float(np.mean(mask_ratios))
+                                masked_fractions = [
+                                    metadata["papo_masked_fraction"]
+                                    for metadata in metadata_rows
+                                    if "papo_masked_fraction" in metadata
+                                ]
+                                if masked_fractions:
+                                    metrics["train/papo_masked_fraction_mean"] = float(np.mean(masked_fractions))
+                                if str(papo_mask_strategy or "random").lower().strip() in {
+                                    "grounding",
+                                    "grounding_region_random",
+                                    "grounding_patch_sample",
+                                }:
+                                    grounding_used = [
+                                        1.0 if metadata.get("papo_grounding_used", False) else 0.0
+                                        for metadata in metadata_rows
+                                        if "papo_grounding_used" in metadata
+                                    ]
+                                    if grounding_used:
+                                        metrics["train/papo_grounding_used_ratio"] = float(np.mean(grounding_used))
+                                    fallback_used = [
+                                        1.0 if metadata.get("papo_fallback", False) else 0.0
+                                        for metadata in metadata_rows
+                                        if "papo_fallback" in metadata
+                                    ]
+                                    if fallback_used:
+                                        metrics["train/papo_fallback_ratio"] = float(np.mean(fallback_used))
+                                    grounding_missing = [
+                                        1.0 if metadata.get("papo_grounding_missing", False) else 0.0
+                                        for metadata in metadata_rows
+                                        if "papo_grounding_missing" in metadata
+                                    ]
+                                    if grounding_missing:
+                                        metrics["train/papo_grounding_missing_ratio"] = float(np.mean(grounding_missing))
+
+                                    grounding_box_fractions = [
+                                        metadata["papo_grounding_box_fraction"]
+                                        for metadata in metadata_rows
+                                        if "papo_grounding_box_fraction" in metadata
+                                    ]
+                                    if grounding_box_fractions:
+                                        metrics["train/papo_grounding_box_fraction_mean"] = float(np.mean(grounding_box_fractions))
+                                    grounding_region_fractions = [
+                                        metadata["papo_grounding_region_fraction"]
+                                        for metadata in metadata_rows
+                                        if "papo_grounding_region_fraction" in metadata
+                                    ]
+                                    if grounding_region_fractions:
+                                        metrics["train/papo_grounding_region_fraction_mean"] = float(np.mean(grounding_region_fractions))
+                                    masked_in_grounding = [
+                                        metadata["papo_masked_fraction_in_grounding"]
+                                        for metadata in metadata_rows
+                                        if "papo_masked_fraction_in_grounding" in metadata
+                                    ]
+                                    if masked_in_grounding:
+                                        metrics["train/papo_masked_fraction_in_grounding_mean"] = float(
+                                            np.mean(masked_in_grounding)
+                                        )
+                                    grounding_region_patch_counts = [
+                                        metadata["papo_grounding_region_patch_count"]
+                                        for metadata in metadata_rows
+                                        if "papo_grounding_region_patch_count" in metadata
+                                    ]
+                                    if grounding_region_patch_counts:
+                                        metrics["train/papo_grounding_region_patch_count_mean"] = float(
+                                            np.mean(grounding_region_patch_counts)
+                                        )
+                                    mask_region_patch_ratios = [
+                                        metadata["papo_mask_region_patch_ratio"]
+                                        for metadata in metadata_rows
+                                        if "papo_mask_region_patch_ratio" in metadata
+                                    ]
+                                    if mask_region_patch_ratios:
+                                        metrics["train/papo_mask_region_patch_ratio_mean"] = float(
+                                            np.mean(mask_region_patch_ratios)
+                                        )
+                                    mask_total_patch_ratios = [
+                                        metadata["papo_mask_total_patch_ratio"]
+                                        for metadata in metadata_rows
+                                        if "papo_mask_total_patch_ratio" in metadata
+                                    ]
+                                    if mask_total_patch_ratios:
+                                        metrics["train/papo_mask_total_patch_ratio_mean"] = float(
+                                            np.mean(mask_total_patch_ratios)
+                                        )
+
                                 metrics["train/papo_aug_log_prob_mean"] = float(
                                     agg_loss(
                                         loss_mat=aug_log_prob.batch["old_log_probs"],

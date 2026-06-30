@@ -3,7 +3,7 @@ set -Eeuo pipefail
 #export VLLM_ATTENTION_BACKEND=XFORMERS
 # ray stop
 unset VLLM_ATTENTION_BACKEND
-export VLLM_USE_V1="${VLLM_USE_V1:-1}"
+export VLLM_USE_V1="${VLLM_USE_V1:-0}"
 export HF_HOME="${HF_HOME:-/root/autodl-tmp/.cache/huggingface}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
@@ -74,6 +74,12 @@ PAPO_ORI_ENTROPY_COEF="${PAPO_ORI_ENTROPY_COEF:-0.0}"
 PAPO_MASK_PATCH_SIZE="${PAPO_MASK_PATCH_SIZE:-14}"
 PAPO_MASK_PROB="${PAPO_MASK_PROB:-0.6}"
 PAPO_MASK_TYPE="${PAPO_MASK_TYPE:-black}"
+PAPO_MASK_STRATEGY="${PAPO_MASK_STRATEGY:-random}"
+PAPO_GROUNDING_FILE="${PAPO_GROUNDING_FILE:-}"
+PAPO_GROUNDING_DIRECTION="${PAPO_GROUNDING_DIRECTION:-evidence}"
+PAPO_GROUNDING_BOX_DILATE="${PAPO_GROUNDING_BOX_DILATE:-0.0}"
+PAPO_FALLBACK_MASK="${PAPO_FALLBACK_MASK:-resolution}"
+PAPO_FALLBACK_DOWNSCALE="${PAPO_FALLBACK_DOWNSCALE:-0.25}"
 ACTOR_KL_LOSS_COEF="${ACTOR_KL_LOSS_COEF:-0.001}"
 ACTOR_CLIP_RATIO_LOW="${ACTOR_CLIP_RATIO_LOW:-0.2}"
 ACTOR_CLIP_RATIO_HIGH="${ACTOR_CLIP_RATIO_HIGH:-0.2}"
@@ -93,7 +99,7 @@ echo "[run] data=$DATA_LOCAL_DIR reward_style=$TTRL_REWARD_STYLE gamma=$SOFT_LAB
 echo "[run] entropy_temperature version=$ENTROPY_TEMPERATURE_VERSION tau0=$ENTROPY_TEMPERATURE_TAU0 gamma=$ENTROPY_TEMPERATURE_GAMMA lambda=$ENTROPY_TEMPERATURE_LAMBDA tau_min=$ENTROPY_TEMPERATURE_TAU_MIN"
 echo "[run] density_temperature t0=$DENSITY_TEMPERATURE_T0 t_min=$DENSITY_TEMPERATURE_T_MIN t_max=$DENSITY_TEMPERATURE_T_MAX embedding_scope=$DENSITY_EMBEDDING_SCOPE log_embeddings=${TTRL_LOG_RESPONSE_EMBEDDINGS:-0}"
 echo "[run] numeric_reward kernel_sigma=$NUMERIC_KERNEL_SIGMA trim_ratio=$NUMERIC_TRIM_RATIO"
-echo "[run] papo use=$USE_PAPO_PRCP_LOSS valid_only=$PAPO_VALID_ONLY coef=$PAPO_KL_PRCP_COEF clip=$PAPO_KL_PRCP_CLIP entropy_coef=$PAPO_ORI_ENTROPY_COEF mask_type=$PAPO_MASK_TYPE mask_patch=$PAPO_MASK_PATCH_SIZE mask_prob=$PAPO_MASK_PROB"
+echo "[run] papo use=$USE_PAPO_PRCP_LOSS valid_only=$PAPO_VALID_ONLY coef=$PAPO_KL_PRCP_COEF clip=$PAPO_KL_PRCP_CLIP entropy_coef=$PAPO_ORI_ENTROPY_COEF mask_strategy=$PAPO_MASK_STRATEGY mask_type=$PAPO_MASK_TYPE mask_patch=$PAPO_MASK_PATCH_SIZE mask_prob=$PAPO_MASK_PROB grounding_file=${PAPO_GROUNDING_FILE:-unset} grounding_direction=$PAPO_GROUNDING_DIRECTION fallback=$PAPO_FALLBACK_MASK"
 echo "[run] actor kl_loss_coef=$ACTOR_KL_LOSS_COEF clip_low=$ACTOR_CLIP_RATIO_LOW clip_high=$ACTOR_CLIP_RATIO_HIGH"
 echo "[run] rollout chunked_prefill=$ROLLOUT_ENABLE_CHUNKED_PREFILL limit_images=${ROLLOUT_LIMIT_IMAGES:-unset}"
 echo "[run] log=$LOG_FILE"
@@ -142,6 +148,12 @@ fi
   data.papo_mask_patch_size=$PAPO_MASK_PATCH_SIZE \
   data.papo_mask_prob=$PAPO_MASK_PROB \
   +data.papo_mask_type=$PAPO_MASK_TYPE \
+  data.papo_mask_strategy=$PAPO_MASK_STRATEGY \
+  data.papo_grounding_file="$PAPO_GROUNDING_FILE" \
+  data.papo_grounding_direction=$PAPO_GROUNDING_DIRECTION \
+  data.papo_grounding_box_dilate=$PAPO_GROUNDING_BOX_DILATE \
+  data.papo_fallback_mask=$PAPO_FALLBACK_MASK \
+  data.papo_fallback_downscale=$PAPO_FALLBACK_DOWNSCALE \
   data.filter_overlong_prompts=True \
   data.truncation='error' \
   actor_rollout_ref.model.path=$BACKBONE_PATH \
