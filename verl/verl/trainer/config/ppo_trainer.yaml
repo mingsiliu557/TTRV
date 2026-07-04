@@ -13,6 +13,11 @@ data:
   return_full_prompt: False
   papo_mask_patch_size: 14
   papo_mask_prob: 0.6
+  papo_cf_mode: pixel
+  papo_attn_cf_ratio: 0.6
+  papo_attn_cf_cut_iv: False
+  papo_attn_cf_style: hard_cut
+  papo_attn_cf_scale: 0.3
   shuffle: True
   filter_overlong_prompts: False # for large-scale dataset, filtering overlong prompts could be timeconsuming. You cat set the filter_overlong_prompts_workers to use multiprocessing to speed up.
   filter_overlong_prompts_workers: 1

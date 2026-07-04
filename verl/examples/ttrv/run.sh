@@ -74,6 +74,11 @@ PAPO_ORI_ENTROPY_COEF="${PAPO_ORI_ENTROPY_COEF:-0.0}"
 PAPO_MASK_PATCH_SIZE="${PAPO_MASK_PATCH_SIZE:-14}"
 PAPO_MASK_PROB="${PAPO_MASK_PROB:-0.6}"
 PAPO_MASK_TYPE="${PAPO_MASK_TYPE:-black}"
+PAPO_CF_MODE="${PAPO_CF_MODE:-pixel}"
+PAPO_ATTN_CF_RATIO="${PAPO_ATTN_CF_RATIO:-0.6}"
+PAPO_ATTN_CF_CUT_IV="${PAPO_ATTN_CF_CUT_IV:-false}"
+PAPO_ATTN_CF_STYLE="${PAPO_ATTN_CF_STYLE:-hard_cut}"
+PAPO_ATTN_CF_SCALE="${PAPO_ATTN_CF_SCALE:-0.3}"
 ACTOR_KL_LOSS_COEF="${ACTOR_KL_LOSS_COEF:-0.001}"
 ACTOR_CLIP_RATIO_LOW="${ACTOR_CLIP_RATIO_LOW:-0.2}"
 ACTOR_CLIP_RATIO_HIGH="${ACTOR_CLIP_RATIO_HIGH:-0.2}"
@@ -93,7 +98,7 @@ echo "[run] data=$DATA_LOCAL_DIR reward_style=$TTRL_REWARD_STYLE gamma=$SOFT_LAB
 echo "[run] entropy_temperature version=$ENTROPY_TEMPERATURE_VERSION tau0=$ENTROPY_TEMPERATURE_TAU0 gamma=$ENTROPY_TEMPERATURE_GAMMA lambda=$ENTROPY_TEMPERATURE_LAMBDA tau_min=$ENTROPY_TEMPERATURE_TAU_MIN"
 echo "[run] density_temperature t0=$DENSITY_TEMPERATURE_T0 t_min=$DENSITY_TEMPERATURE_T_MIN t_max=$DENSITY_TEMPERATURE_T_MAX embedding_scope=$DENSITY_EMBEDDING_SCOPE log_embeddings=${TTRL_LOG_RESPONSE_EMBEDDINGS:-0}"
 echo "[run] numeric_reward kernel_sigma=$NUMERIC_KERNEL_SIGMA trim_ratio=$NUMERIC_TRIM_RATIO"
-echo "[run] papo use=$USE_PAPO_PRCP_LOSS valid_only=$PAPO_VALID_ONLY coef=$PAPO_KL_PRCP_COEF clip=$PAPO_KL_PRCP_CLIP entropy_coef=$PAPO_ORI_ENTROPY_COEF mask_type=$PAPO_MASK_TYPE mask_patch=$PAPO_MASK_PATCH_SIZE mask_prob=$PAPO_MASK_PROB"
+echo "[run] papo use=$USE_PAPO_PRCP_LOSS valid_only=$PAPO_VALID_ONLY coef=$PAPO_KL_PRCP_COEF clip=$PAPO_KL_PRCP_CLIP entropy_coef=$PAPO_ORI_ENTROPY_COEF cf_mode=$PAPO_CF_MODE mask_type=$PAPO_MASK_TYPE mask_patch=$PAPO_MASK_PATCH_SIZE mask_prob=$PAPO_MASK_PROB attn_ratio=$PAPO_ATTN_CF_RATIO attn_cut_iv=$PAPO_ATTN_CF_CUT_IV attn_style=$PAPO_ATTN_CF_STYLE attn_scale=$PAPO_ATTN_CF_SCALE"
 echo "[run] actor kl_loss_coef=$ACTOR_KL_LOSS_COEF clip_low=$ACTOR_CLIP_RATIO_LOW clip_high=$ACTOR_CLIP_RATIO_HIGH"
 echo "[run] rollout chunked_prefill=$ROLLOUT_ENABLE_CHUNKED_PREFILL limit_images=${ROLLOUT_LIMIT_IMAGES:-unset}"
 echo "[run] log=$LOG_FILE"
@@ -142,6 +147,11 @@ fi
   data.papo_mask_patch_size=$PAPO_MASK_PATCH_SIZE \
   data.papo_mask_prob=$PAPO_MASK_PROB \
   +data.papo_mask_type=$PAPO_MASK_TYPE \
+  data.papo_cf_mode=$PAPO_CF_MODE \
+  data.papo_attn_cf_ratio=$PAPO_ATTN_CF_RATIO \
+  data.papo_attn_cf_cut_iv=$PAPO_ATTN_CF_CUT_IV \
+  data.papo_attn_cf_style=$PAPO_ATTN_CF_STYLE \
+  data.papo_attn_cf_scale=$PAPO_ATTN_CF_SCALE \
   data.filter_overlong_prompts=True \
   data.truncation='error' \
   actor_rollout_ref.model.path=$BACKBONE_PATH \

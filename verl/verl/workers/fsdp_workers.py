@@ -671,6 +671,37 @@ class ActorRolloutRefWorker(Worker):
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
+    def compute_attn_cf_log_prob(self, data: DataProto):
+        assert self._is_actor
+        if self._is_offload_param:
+            load_fsdp_model_to_gpu(self.actor_module_fsdp)
+
+        data = data.to(torch.cuda.current_device())
+        data.meta_info["micro_batch_size"] = 1
+        data.meta_info["max_token_len"] = self.config.rollout.log_prob_max_token_len_per_gpu
+        data.meta_info["use_dynamic_bsz"] = False
+        data.meta_info["temperature"] = self.config.rollout.temperature
+        with self.ulysses_sharding_manager:
+            data = self.ulysses_sharding_manager.preprocess_data(data)
+            output, attn_cf_metrics = self.actor.compute_attn_cf_log_prob(data=data)
+            output = DataProto.from_dict(
+                tensors={"old_log_probs": output},
+                meta_info=attn_cf_metrics,
+            )
+            output = self.ulysses_sharding_manager.postprocess_data(output)
+
+        output = output.to("cpu")
+
+        if self.world_size > 1:
+            self.actor.actor_module._handle.reshard(True)
+
+        if self._is_offload_param:
+            offload_fsdp_model_to_cpu(self.actor_module_fsdp)
+
+        log_gpu_memory_usage("After compute_attn_cf_log_prob", logger=logger)
+        return output
+
+    @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_ref_log_prob(self, data: DataProto):
         assert self._is_ref
 

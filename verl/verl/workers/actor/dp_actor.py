@@ -15,8 +15,9 @@
 Single Process Actor
 """
 import re
+import math
 import itertools
-from typing import Tuple
+from typing import Dict, Tuple
 
 import torch
 from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
@@ -250,6 +251,230 @@ class DataParallelPPOActor(BasePPOActor):
         else:
             self.actor_optimizer.step()
         return grad_norm
+
+    @staticmethod
+    def _build_attention_cf_mask(
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        img_context_token_id: int,
+        ratio: float,
+        cut_inter_visual: bool,
+        dtype: torch.dtype,
+        style: str = "hard_cut",
+        scale: float = 0.3,
+    ) -> Tuple[torch.Tensor, Dict[str, float]]:
+        """Build a 4D additive causal mask with text-query -> image-key links weakened.
+
+        The returned mask follows the HuggingFace Qwen2 4D additive attention
+        mask contract. ``hard_cut`` preserves the old behavior by setting
+        selected links to dtype min. ``soft_scale`` adds log(scale), which
+        down-weights selected image-key links before softmax without deleting
+        the visual path completely.
+        """
+        if input_ids.dim() != 2 or attention_mask.dim() != 2:
+            raise ValueError("attention counterfactual expects 2D input_ids and attention_mask")
+        if not (0.0 <= ratio < 1.0):
+            raise ValueError(f"papo_attn_cf_ratio must be in [0, 1), got {ratio}")
+        style = str(style).lower().strip()
+        if style not in ("hard_cut", "soft_scale"):
+            raise ValueError(f"Unsupported papo_attn_cf_style {style!r}; expected hard_cut or soft_scale")
+        if not (0.0 < scale <= 1.0):
+            raise ValueError(f"papo_attn_cf_scale must be in (0, 1], got {scale}")
+
+        batch_size, seqlen = input_ids.shape
+        device = input_ids.device
+        min_dtype = torch.finfo(dtype).min
+        selected_bias = min_dtype if style == "hard_cut" else float(math.log(scale))
+
+        cf_mask = torch.zeros((batch_size, 1, seqlen, seqlen), dtype=dtype, device=device)
+        future_mask = torch.triu(torch.ones((seqlen, seqlen), dtype=torch.bool, device=device), diagonal=1)
+        cf_mask = cf_mask.masked_fill(future_mask.view(1, 1, seqlen, seqlen), min_dtype)
+        key_padding_mask = attention_mask.to(dtype=torch.bool).logical_not()
+        cf_mask = cf_mask.masked_fill(key_padding_mask.view(batch_size, 1, 1, seqlen), min_dtype)
+
+        image_counts = []
+        selected_counts = []
+        text_counts = []
+        no_image = 0
+        for row_idx in range(batch_size):
+            valid_mask = attention_mask[row_idx].to(dtype=torch.bool)
+            image_idx = torch.nonzero(
+                (input_ids[row_idx] == img_context_token_id) & valid_mask,
+                as_tuple=False,
+            ).flatten()
+            text_idx = torch.nonzero(valid_mask & (input_ids[row_idx] != img_context_token_id), as_tuple=False).flatten()
+            num_image = int(image_idx.numel())
+            num_text = int(text_idx.numel())
+            image_counts.append(float(num_image))
+            text_counts.append(float(num_text))
+            if num_image == 0 or num_text == 0 or ratio <= 0.0:
+                selected_counts.append(0.0)
+                if num_image == 0:
+                    no_image += 1
+                continue
+
+            selected_count = min(num_image, max(1, int(round(num_image * ratio))))
+            # Deterministic uniform subset: cheap and reproducible, while avoiding
+            # the extra attention-ranking forward needed for top-attention selection.
+            uniform_offsets = torch.div(
+                torch.arange(selected_count, device=device) * num_image,
+                selected_count,
+                rounding_mode="floor",
+            )
+            selected_image_idx = image_idx[uniform_offsets]
+            selected_counts.append(float(selected_count))
+            query_idx = image_idx if cut_inter_visual else text_idx
+            if query_idx.numel() > 0:
+                cf_mask[row_idx, 0, query_idx[:, None], selected_image_idx[None, :]] = selected_bias
+
+        total_image = sum(image_counts)
+        total_selected = sum(selected_counts)
+        metrics = {
+            "papo_attn_cf_image_token_count_mean": sum(image_counts) / max(len(image_counts), 1),
+            "papo_attn_cf_text_token_count_mean": sum(text_counts) / max(len(text_counts), 1),
+            "papo_attn_cf_selected_image_ratio": total_selected / max(total_image, 1.0),
+            "papo_attn_cf_no_image_ratio": float(no_image) / max(batch_size, 1),
+            "papo_attn_cf_soft_scale_active": float(style == "soft_scale"),
+            "papo_attn_cf_scale": float(scale),
+        }
+        return cf_mask, metrics
+
+    def _forward_attn_cf_micro_batch(
+        self,
+        micro_batch,
+        temperature: float,
+        ratio: float,
+        cut_inter_visual: bool,
+        style: str,
+        scale: float,
+    ) -> Tuple[torch.Tensor, Dict[str, float]]:
+        response_length = micro_batch["responses"].size(-1)
+        multi_modal_inputs = {}
+        if "multi_modal_inputs" in micro_batch.keys():
+            if "image_bound" in micro_batch["multi_modal_inputs"][0]:  # minicpm-o logic
+                for key in micro_batch["multi_modal_inputs"][0].keys():
+                    multi_modal_inputs[key] = [inputs[key] for inputs in micro_batch["multi_modal_inputs"]]
+            else:
+                image_flags = None
+                for key in micro_batch["multi_modal_inputs"][0].keys():
+                    multi_modal_inputs[key] = torch.cat(
+                        [inputs[key] for inputs in micro_batch["multi_modal_inputs"]], dim=0
+                    )
+                    if re.match("internvl", self.actor_module.config.model_type):
+                        if key == "pixel_values":
+                            image_flags = torch.ones(
+                                multi_modal_inputs[key].size(0),
+                                dtype=torch.long,
+                                device=multi_modal_inputs[key].device,
+                            )
+                if image_flags is not None:
+                    multi_modal_inputs["image_flags"] = image_flags
+
+        attr_module = getattr(self.actor_module, "module", self.actor_module)
+        img_context_token_id = getattr(self.actor_module, "img_context_token_id", None)
+        if img_context_token_id is None:
+            img_context_token_id = getattr(attr_module, "img_context_token_id", None)
+        if img_context_token_id is None:
+            raise ValueError("attention counterfactual requires a non-null img_context_token_id")
+
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            input_ids = micro_batch["input_ids"]
+            attention_mask_2d = micro_batch["attention_mask"]
+            position_ids = micro_batch["position_ids"]
+            if position_ids.dim() == 3:  # qwen2vl mrope
+                position_ids = position_ids.transpose(0, 1)
+
+            cf_attention_mask, mask_metrics = self._build_attention_cf_mask(
+                input_ids=input_ids,
+                attention_mask=attention_mask_2d,
+                img_context_token_id=img_context_token_id,
+                ratio=ratio,
+                cut_inter_visual=cut_inter_visual,
+                dtype=torch.bfloat16,
+                style=style,
+                scale=scale,
+            )
+            attr_module = getattr(self.actor_module, "module", self.actor_module)
+            language_model = getattr(attr_module, "language_model", None)
+            attn_impl_stack = []
+            for module in (attr_module, language_model, getattr(language_model, "model", None)):
+                config = getattr(module, "config", None)
+                if config is not None and hasattr(config, "_attn_implementation"):
+                    attn_impl_stack.append((config, config._attn_implementation))
+                    config._attn_implementation = "eager"
+            try:
+                output = self.actor_module(
+                    input_ids=input_ids,
+                    attention_mask=cf_attention_mask,
+                    position_ids=position_ids,
+                    **multi_modal_inputs,
+                    use_cache=False,
+                    output_hidden_states=False,
+                    return_dict=True,
+                )
+            finally:
+                for config, old_impl in reversed(attn_impl_stack):
+                    config._attn_implementation = old_impl
+            logits = output.logits
+            logits.div_(temperature)
+            logits = logits[:, -response_length - 1 : -1, :]
+            log_probs = logprobs_from_logits(logits, micro_batch["responses"])
+            return log_probs, mask_metrics
+
+    def compute_attn_cf_log_prob(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, float]]:
+        """Compute response log-probs under an attention-space image counterfactual.
+
+        This intentionally bypasses the remove-padding/varlen path so a normal
+        4D additive attention mask can be injected into the LLM.
+        """
+        self.actor_module.eval()
+
+        temperature = data.meta_info["temperature"]
+        ratio = float(data.meta_info.get("papo_attn_cf_ratio", self.config.get("papo_attn_cf_ratio", 0.6)))
+        cut_inter_visual = bool(
+            data.meta_info.get("papo_attn_cf_cut_iv", self.config.get("papo_attn_cf_cut_iv", False))
+        )
+        style = str(data.meta_info.get("papo_attn_cf_style", self.config.get("papo_attn_cf_style", "hard_cut")))
+        scale = float(data.meta_info.get("papo_attn_cf_scale", self.config.get("papo_attn_cf_scale", 0.3)))
+
+        select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
+        has_multi_modal_inputs = "multi_modal_inputs" in data.non_tensor_batch.keys()
+        batch_size = data.batch["responses"].size(0)
+        if has_multi_modal_inputs:
+            micro_batches = data.select(select_keys, ["multi_modal_inputs"]).chunk(batch_size)
+        else:
+            micro_batches = data.select(batch_keys=select_keys).batch.split(1)
+
+        log_probs_lst = []
+        metric_sums: Dict[str, float] = {}
+        metric_count = 0
+        for micro_batch in micro_batches:
+            if isinstance(micro_batch, DataProto):
+                micro_batch = {**micro_batch.batch, **micro_batch.non_tensor_batch}
+            else:
+                micro_batch = micro_batch.to(torch.cuda.current_device())
+
+            with torch.no_grad():
+                log_probs, mask_metrics = self._forward_attn_cf_micro_batch(
+                    micro_batch=micro_batch,
+                    temperature=temperature,
+                    ratio=ratio,
+                    cut_inter_visual=cut_inter_visual,
+                    style=style,
+                    scale=scale,
+                )
+            log_probs_lst.append(log_probs)
+            for key, value in mask_metrics.items():
+                metric_sums[key] = metric_sums.get(key, 0.0) + float(value)
+            metric_count += 1
+
+        log_probs = torch.concat(log_probs_lst, dim=0)
+        metrics = {key: value / max(metric_count, 1) for key, value in metric_sums.items()}
+        metrics["papo_attn_cf_ratio"] = ratio
+        metrics["papo_attn_cf_cut_iv"] = float(cut_inter_visual)
+        metrics["papo_attn_cf_style_soft_scale"] = float(str(style).lower().strip() == "soft_scale")
+        metrics["papo_attn_cf_scale"] = scale
+        return log_probs, metrics
 
     def compute_log_prob(self, data: DataProto, calculate_entropy=False, return_response_embeddings=False) -> torch.Tensor:
         """Compute the log probability of the responses given input_ids, attention_mask and position_ids

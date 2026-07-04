@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+RUN_TAG="$(date +%Y%m%d_%H%M%S)"
+REPO_ROOT="/vepfs_default/chanxueyan/lhp/lms/TTRV"
+EXP_ROOT="/jiigan-hp/ttrv-datasets/experiments/attention_space_papo_ai2d_mathverse_sweep_${RUN_TAG}"
+QUEUE_ID="${QUEUE_ID:-q-20250901110548-6w2bl}"
+FLAVOR_ID="${FLAVOR_ID:-ml.pni2l.7xlarge}"
+
+mkdir -p "$EXP_ROOT"
+LAUNCH_LOG="$EXP_ROOT/volc_launch.log"
+SUMMARY_TSV="$EXP_ROOT/sweep_manifest.tsv"
+echo -e "key\ttask\treward\tscope\tparser\tlabels\tt0\ttmin\ttmax\tmask\tkl\tori\tactor_kl\tclip_low\tclip_high\tattn_ratio\tattn_scale" > "$SUMMARY_TSV"
+
+run_one() {
+  local key="$1"
+  local task="$2"
+  local reward="$3"
+  local scope="$4"
+  local parser="$5"
+  local labels="$6"
+  local t0="$7"
+  local tmin="$8"
+  local tmax="$9"
+  local mask="${10}"
+  local kl="${11}"
+  local ori="${12}"
+  local actor_kl="${13}"
+  local clip_low="${14}"
+  local clip_high="${15}"
+  local attn_ratio="${16}"
+  local attn_scale="${17}"
+  local worker="$EXP_ROOT/worker_${key}.sh"
+  local run_dir="$EXP_ROOT/$key"
+
+  echo -e "${key}\t${task}\t${reward}\t${scope}\t${parser}\t${labels}\t${t0}\t${tmin}\t${tmax}\t${mask}\t${kl}\t${ori}\t${actor_kl}\t${clip_low}\t${clip_high}\t${attn_ratio}\t${attn_scale}" >> "$SUMMARY_TSV"
+
+  cat > "$worker" <<'WORKER_EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+REPO_ROOT="/vepfs_default/chanxueyan/lhp/lms/TTRV"
+VERL_DIR="$REPO_ROOT/verl"
+DATA_ROOT="/jiigan-hp/ttrv-datasets"
+EXP_ROOT="__EXP_ROOT__"
+KEY="__KEY__"
+TASK_NAME="__TASK__"
+REWARD_STYLE="__REWARD__"
+EMBED_SCOPE="__SCOPE__"
+PARSE_MODE="__PARSER__"
+CHOICE_LABELS="__LABELS__"
+TEMP_T0="__T0__"
+TEMP_TMIN="__TMIN__"
+TEMP_TMAX="__TMAX__"
+MASK_PROB="__MASK__"
+KL_COEF="__KL__"
+ORI_ENTROPY="__ORI__"
+ACTOR_KL="__ACTOR_KL__"
+CLIP_LOW="__CLIP_LOW__"
+CLIP_HIGH="__CLIP_HIGH__"
+ATTN_RATIO="__ATTN_RATIO__"
+ATTN_SCALE="__ATTN_SCALE__"
+RUNTIME_ROOT="/vepfs_default/chanxueyan/lhp/lms/ttrv_runtime"
+RUN_TAG="$(basename "$EXP_ROOT")"
+
+mkdir -p "$EXP_ROOT"
+exec > >(tee -a "$EXP_ROOT/worker_${KEY}.log") 2>&1
+cd "$VERL_DIR"
+
+export PATH="/vepfs_default/chanxueyan/lhp/lms/envs/ttrv/bin:$PATH"
+export PYTHON_BIN="/vepfs_default/chanxueyan/lhp/lms/envs/ttrv/bin/python"
+export CUDA_VISIBLE_DEVICES="0,1"
+export NO_GPU=2
+export DATA_LOCAL_DIR="$DATA_ROOT/verl_data"
+export BACKBONE_PATH="$RUNTIME_ROOT/models/OpenGVLab/InternVL3-2B"
+export HF_HOME="$RUNTIME_ROOT/hf_home"
+export HF_MODULES_CACHE="$RUNTIME_ROOT/hf_home/modules"
+export TRANSFORMERS_CACHE="$RUNTIME_ROOT/hf_home/transformers"
+export XDG_CACHE_HOME="$RUNTIME_ROOT/xdg_cache"
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HYDRA_FULL_ERROR=1
+export VLLM_USE_V1=0
+
+export EPISODE=2
+export DATA_TRAIN_BATCH_SIZE=2
+export MINI_BATCH_SIZE=1
+export MICRO_BATCH_SIZE=2
+export N_VOTES_PER_PROMPT=32
+export N_SAMPLES_PER_PROMPT=16
+export N=1
+export ENTROPY_COEF=0.0
+export USE_PAPO_PRCP_LOSS=true
+export PAPO_VALID_ONLY=false
+export PAPO_KL_PRCP_CLIP=0.2
+export PAPO_MASK_PATCH_SIZE=14
+export PAPO_MASK_TYPE=black
+export PAPO_CF_MODE=attention
+export PAPO_ATTN_CF_RATIO="$ATTN_RATIO"
+export PAPO_ATTN_CF_CUT_IV=false
+export PAPO_ATTN_CF_STYLE=soft_scale
+export PAPO_ATTN_CF_SCALE="$ATTN_SCALE"
+export TTRL_VAL_NUM_EXAMINE=0
+export TTRL_LOG_RESPONSE_EMBEDDINGS=0
+export ROLLOUT_ENABLE_CHUNKED_PREFILL=False
+export ROLLOUT_LIMIT_IMAGES=1
+
+run_name="attn_sweep_${KEY}_${RUN_TAG}"
+run_dir="$EXP_ROOT/$KEY"
+tmp_root="/tmp/a$$"
+rm -rf "$tmp_root"
+mkdir -p "$run_dir" "$tmp_root/t" "$tmp_root/r" "$tmp_root/tr" "$tmp_root/cu"
+rm -f "$run_dir/SUCCESS" "$run_dir/FAILED"
+trap 'echo "[worker] FAILED $run_name $(date)"; touch "$run_dir/FAILED"' ERR
+
+export TASK="$TASK_NAME"
+export ANSWER_PARSE_MODE="$PARSE_MODE"
+export ANSWER_CHOICE_LABELS="$CHOICE_LABELS"
+export TTRL_REWARD_STYLE="$REWARD_STYLE"
+export DENSITY_EMBEDDING_SCOPE="$EMBED_SCOPE"
+export DENSITY_TEMPERATURE_T0="$TEMP_T0"
+export DENSITY_TEMPERATURE_T_MIN="$TEMP_TMIN"
+export DENSITY_TEMPERATURE_T_MAX="$TEMP_TMAX"
+export PAPO_MASK_PROB="$MASK_PROB"
+export PAPO_KL_PRCP_COEF="$KL_COEF"
+export PAPO_ORI_ENTROPY_COEF="$ORI_ENTROPY"
+export ACTOR_KL_LOSS_COEF="$ACTOR_KL"
+export ACTOR_CLIP_RATIO_LOW="$CLIP_LOW"
+export ACTOR_CLIP_RATIO_HIGH="$CLIP_HIGH"
+export LOG_DIR="$run_dir"
+export LOG_FILE="$run_dir/run.log"
+export TTRL_TRAIN_ROLLOUT_JSONL="$run_dir/train_rollouts.jsonl"
+export TTRL_EVAL_OUTPUT_JSONL="$run_dir/validation_step10_20_flat.jsonl"
+export TTRL_EVAL_GROUP_OUTPUT_JSONL="$run_dir/validation_groups.jsonl"
+export TMPDIR="$tmp_root/t"
+export RAY_TMPDIR="$tmp_root/r"
+export TRITON_CACHE_DIR="$tmp_root/tr"
+export CUDA_CACHE_PATH="$tmp_root/cu"
+
+echo "[worker] host=$(hostname) start=$(date) exp_root=$EXP_ROOT"
+echo "[worker] branch=$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true) commit=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || true)"
+nvidia-smi -L || true
+echo "[worker] ===== start $run_name $(date) ====="
+echo "[worker] task=$TASK reward=$TTRL_REWARD_STYLE scope=$DENSITY_EMBEDDING_SCOPE parser=$ANSWER_PARSE_MODE labels=$ANSWER_CHOICE_LABELS"
+echo "[worker] density T0=$DENSITY_TEMPERATURE_T0 Tmin=$DENSITY_TEMPERATURE_T_MIN Tmax=$DENSITY_TEMPERATURE_T_MAX"
+echo "[worker] papo cf=$PAPO_CF_MODE attn_ratio=$PAPO_ATTN_CF_RATIO attn_style=$PAPO_ATTN_CF_STYLE attn_scale=$PAPO_ATTN_CF_SCALE mask=$PAPO_MASK_PROB kl=$PAPO_KL_PRCP_COEF ori=$PAPO_ORI_ENTROPY_COEF actor_kl=$ACTOR_KL_LOSS_COEF clip=$ACTOR_CLIP_RATIO_LOW/$ACTOR_CLIP_RATIO_HIGH"
+echo "[worker] run_dir=$run_dir"
+
+if [[ "$TASK" == mathvista_* ]]; then
+  echo "[worker] MathVista image preflight"
+  "$PYTHON_BIN" - <<'PY_PREFLIGHT'
+from multiprocessing import Pool
+from PIL import Image
+import pandas as pd
+files = [
+    "/jiigan-hp/ttrv-datasets/verl_data/mathvista_20_hq_train13_repeat20/train.parquet",
+    "/jiigan-hp/ttrv-datasets/verl_data/mathvista_20_hq_train13_repeat20/test.parquet",
+]
+paths = []
+for fp in files:
+    df = pd.read_parquet(fp)
+    for imgs in df["images"]:
+        for item in imgs:
+            paths.append(item["image"])
+paths = list(dict.fromkeys(paths))
+def check(path):
+    try:
+        img = Image.open(path); img.load(); return None
+    except Exception as exc:
+        return (path, type(exc).__name__, str(exc))
+with Pool(8) as pool:
+    bad = [item for item in pool.map(check, paths) if item]
+print({"unique_paths": len(paths), "bad": len(bad)})
+for item in bad[:20]: print(item)
+raise SystemExit(1 if bad else 0)
+PY_PREFLIGHT
+fi
+
+bash examples/ttrv/run.sh \
+  trainer.val_before_train=False \
+  trainer.test_freq=10 \
+  trainer.save_freq=-1 \
+  trainer.max_actor_ckpt_to_keep=0 \
+  trainer.max_critic_ckpt_to_keep=0 \
+  trainer.experiment_name="$run_name" \
+  trainer.default_local_dir="$run_dir/checkpoints"
+
+touch "$run_dir/SUCCESS"
+echo "[worker] ===== done $run_name $(date) ====="
+exit 0
+WORKER_EOF
+
+  sed -i \
+    -e "s#__EXP_ROOT__#$EXP_ROOT#g" \
+    -e "s#__KEY__#$key#g" \
+    -e "s#__TASK__#$task#g" \
+    -e "s#__REWARD__#$reward#g" \
+    -e "s#__SCOPE__#$scope#g" \
+    -e "s#__PARSER__#$parser#g" \
+    -e "s#__LABELS__#$labels#g" \
+    -e "s#__T0__#$t0#g" \
+    -e "s#__TMIN__#$tmin#g" \
+    -e "s#__TMAX__#$tmax#g" \
+    -e "s#__MASK__#$mask#g" \
+    -e "s#__KL__#$kl#g" \
+    -e "s#__ORI__#$ori#g" \
+    -e "s#__ACTOR_KL__#$actor_kl#g" \
+    -e "s#__CLIP_LOW__#$clip_low#g" \
+    -e "s#__CLIP_HIGH__#$clip_high#g" \
+    -e "s#__ATTN_RATIO__#$attn_ratio#g" \
+    -e "s#__ATTN_SCALE__#$attn_scale#g" \
+    "$worker"
+  chmod +x "$worker"
+
+  echo "[launcher] ===== $key start $(date) =====" | tee -a "$LAUNCH_LOG"
+  set +e
+  volc ml_devinstance launch --resource_queue_id "$QUEUE_ID" --flavor_id "$FLAVOR_ID" bash "$worker" 2>&1 | tee -a "$LAUNCH_LOG"
+  local volc_status=${PIPESTATUS[0]}
+  set -e
+  if [[ $volc_status -ne 0 ]]; then
+    echo "[launcher] WARN: volc status $volc_status for $key" | tee -a "$LAUNCH_LOG"
+  fi
+  if [[ -f "$run_dir/SUCCESS" ]]; then
+    echo "[launcher] SUCCESS $key $(date)" | tee -a "$LAUNCH_LOG"
+  else
+    echo "[launcher] NO_SUCCESS_MARKER $key $(date)" | tee -a "$LAUNCH_LOG"
+  fi
+  echo "[launcher] ===== $key end $(date) =====" | tee -a "$LAUNCH_LOG"
+}
+
+echo "[launcher] exp_root=$EXP_ROOT" | tee -a "$LAUNCH_LOG"
+echo "[launcher] attention soft-scale AI2D/MathVerse sweep; one 2-GPU worker per run; no shutdown command" | tee -a "$LAUNCH_LOG"
+echo "[launcher] AI2D: around previous best r=0.40 scale=0.30 KL=0.01 ori=0.0" | tee -a "$LAUNCH_LOG"
+echo "[launcher] MathVerse: around previous setting r=0.40 scale=0.30 KL=0.01 ori=0.04" | tee -a "$LAUNCH_LOG"
+
+# AI2D20: keep reward/parser/density settings aligned with prior best density-PAPO and attention-space runs.
+run_one "ai2d_r0p40_s0p30_kl001_ori000" \
+  "ai2d_20" "density_cluster_answer_entropy" "evidence_query_mean_pool" "legacy" "A-D" \
+  "0.20" "0.10" "0.30" "0.60" "0.01" "0.0" "0.001" "0.2" "0.2" "0.40" "0.30"
+run_one "ai2d_r0p35_s0p30_kl001_ori000" \
+  "ai2d_20" "density_cluster_answer_entropy" "evidence_query_mean_pool" "legacy" "A-D" \
+  "0.20" "0.10" "0.30" "0.60" "0.01" "0.0" "0.001" "0.2" "0.2" "0.35" "0.30"
+run_one "ai2d_r0p45_s0p30_kl001_ori000" \
+  "ai2d_20" "density_cluster_answer_entropy" "evidence_query_mean_pool" "legacy" "A-D" \
+  "0.20" "0.10" "0.30" "0.60" "0.01" "0.0" "0.001" "0.2" "0.2" "0.45" "0.30"
+run_one "ai2d_r0p40_s0p50_kl001_ori000" \
+  "ai2d_20" "density_cluster_answer_entropy" "evidence_query_mean_pool" "legacy" "A-D" \
+  "0.20" "0.10" "0.30" "0.60" "0.01" "0.0" "0.001" "0.2" "0.2" "0.40" "0.50"
+run_one "ai2d_r0p40_s0p30_kl0005_ori000" \
+  "ai2d_20" "density_cluster_answer_entropy" "evidence_query_mean_pool" "legacy" "A-D" \
+  "0.20" "0.10" "0.30" "0.60" "0.005" "0.0" "0.001" "0.2" "0.2" "0.40" "0.30"
+run_one "ai2d_r0p40_s0p30_kl001_ori001" \
+  "ai2d_20" "density_cluster_answer_entropy" "evidence_query_mean_pool" "legacy" "A-D" \
+  "0.20" "0.10" "0.30" "0.60" "0.01" "0.01" "0.001" "0.2" "0.2" "0.40" "0.30"
+
+# MathVerse fixed / promptfix: keep fixed density reward, parser, labels, and actor settings aligned with current record.
+run_one "mathverse_r0p40_s0p30_kl001_ori004" \
+  "mathverse_20_choice_norm_promptfix" "density_cluster_soft" "evidence_query_mean_pool" "mathvista_choice" "A-F" \
+  "0.20" "0.20" "0.20" "0.60" "0.01" "0.04" "0.001" "0.2" "0.2" "0.40" "0.30"
+run_one "mathverse_r0p30_s0p50_kl001_ori004" \
+  "mathverse_20_choice_norm_promptfix" "density_cluster_soft" "evidence_query_mean_pool" "mathvista_choice" "A-F" \
+  "0.20" "0.20" "0.20" "0.60" "0.01" "0.04" "0.001" "0.2" "0.2" "0.30" "0.50"
+run_one "mathverse_r0p40_s0p50_kl001_ori004" \
+  "mathverse_20_choice_norm_promptfix" "density_cluster_soft" "evidence_query_mean_pool" "mathvista_choice" "A-F" \
+  "0.20" "0.20" "0.20" "0.60" "0.01" "0.04" "0.001" "0.2" "0.2" "0.40" "0.50"
+run_one "mathverse_r0p30_s0p30_kl001_ori004" \
+  "mathverse_20_choice_norm_promptfix" "density_cluster_soft" "evidence_query_mean_pool" "mathvista_choice" "A-F" \
+  "0.20" "0.20" "0.20" "0.60" "0.01" "0.04" "0.001" "0.2" "0.2" "0.30" "0.30"
+run_one "mathverse_r0p40_s0p30_kl0005_ori004" \
+  "mathverse_20_choice_norm_promptfix" "density_cluster_soft" "evidence_query_mean_pool" "mathvista_choice" "A-F" \
+  "0.20" "0.20" "0.20" "0.60" "0.005" "0.04" "0.001" "0.2" "0.2" "0.40" "0.30"
+run_one "mathverse_r0p40_s0p30_kl001_ori002" \
+  "mathverse_20_choice_norm_promptfix" "density_cluster_soft" "evidence_query_mean_pool" "mathvista_choice" "A-F" \
+  "0.20" "0.20" "0.20" "0.60" "0.01" "0.02" "0.001" "0.2" "0.2" "0.40" "0.30"
+
+echo "[launcher] all done $(date)" | tee -a "$LAUNCH_LOG"

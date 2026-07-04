@@ -1800,29 +1800,61 @@ class RayPPOTrainer:
 
                         if self.config.actor_rollout_ref.actor.get("use_papo_prcp_loss", False):
                             with _timer("papo_aug_log_prob", timing_raw):
-                                papo_masked_inputs, papo_mask_metadata = _build_papo_masked_multi_modal_inputs(
-                                    batch=batch,
-                                    processor=self.processor,
-                                    patch_size=self.config.data.get("papo_mask_patch_size", 14),
-                                    black_prob=self.config.data.get("papo_mask_prob", 0.6),
-                                    global_step=self.global_steps,
-                                    mask_type=self.config.data.get("papo_mask_type", "black"),
-                                )
-                                papo_aug_batch = batch.select(
-                                    batch_keys=["responses", "input_ids", "attention_mask", "position_ids"],
-                                    non_tensor_batch_keys=["multi_modal_inputs"],
-                                )
-                                papo_aug_batch.non_tensor_batch["multi_modal_inputs"] = papo_masked_inputs
-                                papo_aug_batch.meta_info = deepcopy(batch.meta_info)
-                                papo_aug_batch.meta_info["return_response_embeddings"] = False
-                                aug_log_prob = self.actor_rollout_wg.compute_log_prob(papo_aug_batch)
-                                batch.batch["aug_log_probs"] = aug_log_prob.batch["old_log_probs"]
-                                mask_ratios = []
-                                for metadata in papo_mask_metadata:
-                                    if isinstance(metadata, dict):
-                                        mask_ratios.append(metadata.get("papo_mask_blackened_ratio", 0.0))
-                                if mask_ratios:
-                                    metrics["train/papo_mask_blackened_ratio"] = float(np.mean(mask_ratios))
+                                papo_cf_mode = str(self.config.data.get("papo_cf_mode", "pixel")).lower().strip()
+                                metrics["train/papo_cf_mode_attention"] = float(papo_cf_mode == "attention")
+                                if papo_cf_mode == "attention":
+                                    papo_aug_batch = batch.select(
+                                        batch_keys=["responses", "input_ids", "attention_mask", "position_ids"],
+                                        non_tensor_batch_keys=["multi_modal_inputs"],
+                                    )
+                                    papo_aug_batch.meta_info = deepcopy(batch.meta_info)
+                                    papo_aug_batch.meta_info["return_response_embeddings"] = False
+                                    papo_aug_batch.meta_info["papo_attn_cf_ratio"] = float(
+                                        self.config.data.get("papo_attn_cf_ratio", 0.6)
+                                    )
+                                    papo_aug_batch.meta_info["papo_attn_cf_cut_iv"] = bool(
+                                        self.config.data.get("papo_attn_cf_cut_iv", False)
+                                    )
+                                    papo_aug_batch.meta_info["papo_attn_cf_style"] = str(
+                                        self.config.data.get("papo_attn_cf_style", "hard_cut")
+                                    )
+                                    papo_aug_batch.meta_info["papo_attn_cf_scale"] = float(
+                                        self.config.data.get("papo_attn_cf_scale", 0.3)
+                                    )
+                                    aug_log_prob = self.actor_rollout_wg.compute_attn_cf_log_prob(papo_aug_batch)
+                                    batch.batch["aug_log_probs"] = aug_log_prob.batch["old_log_probs"]
+                                    for key, value in aug_log_prob.meta_info.items():
+                                        if key.startswith("papo_attn_cf_"):
+                                            metrics[f"train/{key}"] = float(value)
+                                elif papo_cf_mode in ("pixel", "random_patch", "masked_image"):
+                                    papo_masked_inputs, papo_mask_metadata = _build_papo_masked_multi_modal_inputs(
+                                        batch=batch,
+                                        processor=self.processor,
+                                        patch_size=self.config.data.get("papo_mask_patch_size", 14),
+                                        black_prob=self.config.data.get("papo_mask_prob", 0.6),
+                                        global_step=self.global_steps,
+                                        mask_type=self.config.data.get("papo_mask_type", "black"),
+                                    )
+                                    papo_aug_batch = batch.select(
+                                        batch_keys=["responses", "input_ids", "attention_mask", "position_ids"],
+                                        non_tensor_batch_keys=["multi_modal_inputs"],
+                                    )
+                                    papo_aug_batch.non_tensor_batch["multi_modal_inputs"] = papo_masked_inputs
+                                    papo_aug_batch.meta_info = deepcopy(batch.meta_info)
+                                    papo_aug_batch.meta_info["return_response_embeddings"] = False
+                                    aug_log_prob = self.actor_rollout_wg.compute_log_prob(papo_aug_batch)
+                                    batch.batch["aug_log_probs"] = aug_log_prob.batch["old_log_probs"]
+                                    mask_ratios = []
+                                    for metadata in papo_mask_metadata:
+                                        if isinstance(metadata, dict):
+                                            mask_ratios.append(metadata.get("papo_mask_blackened_ratio", 0.0))
+                                    if mask_ratios:
+                                        metrics["train/papo_mask_blackened_ratio"] = float(np.mean(mask_ratios))
+                                else:
+                                    raise ValueError(
+                                        f"Unsupported PAPO counterfactual mode {papo_cf_mode!r}; "
+                                        "expected 'pixel' or 'attention'"
+                                    )
                                 metrics["train/papo_aug_log_prob_mean"] = float(
                                     agg_loss(
                                         loss_mat=aug_log_prob.batch["old_log_probs"],
@@ -1830,6 +1862,14 @@ class RayPPOTrainer:
                                         loss_agg_mode=loss_agg_mode,
                                     ).detach().item()
                                 )
+                                if "old_log_probs" in batch.batch.keys():
+                                    metrics["train/papo_cf_logp_gap_mean"] = float(
+                                        agg_loss(
+                                            loss_mat=batch.batch["old_log_probs"] - aug_log_prob.batch["old_log_probs"],
+                                            loss_mask=batch.batch["response_mask"],
+                                            loss_agg_mode=loss_agg_mode,
+                                        ).detach().item()
+                                    )
 
                         print(f"{list(reward_extra_infos_dict.keys())=}")
                         if reward_extra_infos_dict:
