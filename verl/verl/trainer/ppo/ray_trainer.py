@@ -16,6 +16,7 @@ FSDP PPO Trainer with Ray-based single controller.
 This trainer supports model-agonistic model initialization with huggingface
 """
 
+import json
 import os
 import hashlib
 import random
@@ -31,6 +32,7 @@ from typing import Dict, Type
 
 import numpy as np
 import ray
+import torch
 from codetiming import Timer
 from omegaconf import OmegaConf, open_dict
 from torch.utils.data import Dataset, RandomSampler, SequentialSampler
@@ -673,6 +675,336 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, 
     return data, metrics
 
 
+def _safe_tensor_mean(tensor: torch.Tensor) -> float:
+    if tensor.numel() == 0:
+        return 0.0
+    finite = tensor.detach()[torch.isfinite(tensor.detach())]
+    if finite.numel() == 0:
+        return 0.0
+    return float(finite.mean().item())
+
+
+def _safe_tensor_std(tensor: torch.Tensor) -> float:
+    if tensor.numel() == 0:
+        return 0.0
+    finite = tensor.detach()[torch.isfinite(tensor.detach())]
+    if finite.numel() < 2:
+        return 0.0
+    return float(finite.std(unbiased=False).item())
+
+
+def _safe_tensor_min(tensor: torch.Tensor) -> float:
+    if tensor.numel() == 0:
+        return 0.0
+    finite = tensor.detach()[torch.isfinite(tensor.detach())]
+    if finite.numel() == 0:
+        return 0.0
+    return float(finite.min().item())
+
+
+def _safe_tensor_max(tensor: torch.Tensor) -> float:
+    if tensor.numel() == 0:
+        return 0.0
+    finite = tensor.detach()[torch.isfinite(tensor.detach())]
+    if finite.numel() == 0:
+        return 0.0
+    return float(finite.max().item())
+
+
+def _last_response_token_index(response_mask: torch.Tensor):
+    valid_lengths = response_mask.long().sum(dim=-1)
+    last_index = (valid_lengths - 1).clamp(min=0)
+    valid_response = valid_lengths > 0
+    return last_index, valid_response
+
+
+def _group_zscore_by_uid(values: torch.Tensor, uids, valid_mask: torch.Tensor, eps: float = 1e-6):
+    z_values = torch.zeros_like(values)
+    groups = defaultdict(list)
+    valid_cpu = valid_mask.detach().cpu().numpy().astype(bool)
+    for i, uid in enumerate(list(uids)):
+        if i >= values.size(0):
+            break
+        if valid_cpu[i]:
+            groups[uid].append(i)
+
+    active_groups = 0
+    for indices in groups.values():
+        if len(indices) < 2:
+            continue
+        index_tensor = torch.tensor(indices, device=values.device, dtype=torch.long)
+        group_values = values.index_select(0, index_tensor)
+        group_std = group_values.std(unbiased=False)
+        if not torch.isfinite(group_std) or group_std <= eps:
+            continue
+        group_z = (group_values - group_values.mean()) / (group_std + eps)
+        z_values.index_copy_(0, index_tensor, group_z)
+        active_groups += 1
+
+    return z_values, len(groups), active_groups
+
+
+def _pearson_corr(x: torch.Tensor, y: torch.Tensor, valid_mask: torch.Tensor, eps: float = 1e-6) -> float:
+    valid = valid_mask & torch.isfinite(x) & torch.isfinite(y)
+    if int(valid.sum().item()) < 2:
+        return 0.0
+    x_valid = x[valid].detach()
+    y_valid = y[valid].detach()
+    x_std = x_valid.std(unbiased=False)
+    y_std = y_valid.std(unbiased=False)
+    if x_std <= eps or y_std <= eps:
+        return 0.0
+    corr = ((x_valid - x_valid.mean()) * (y_valid - y_valid.mean())).mean() / (x_std * y_std + eps)
+    if not torch.isfinite(corr):
+        return 0.0
+    return float(corr.item())
+
+
+def apply_visual_dependency_reward(
+    data: DataProto,
+    coef: float = 0.2,
+    raw_clip: float = 20.0,
+    z_clip: float = 3.0,
+    valid_answer_only: bool = False,
+    store_details: bool = False,
+):
+    """Adds detached PAPO original-vs-counterfactual log-prob gap as a GRPO reward component."""
+    required_keys = ["old_log_probs", "aug_log_probs", "token_level_scores"]
+    missing_keys = [key for key in required_keys if key not in data.batch.keys()]
+    if missing_keys:
+        raise ValueError(
+            "visual dependency reward requires "
+            f"{missing_keys}; set USE_PAPO_PRCP_LOSS=true so aug_log_probs are computed."
+        )
+
+    old_log_probs = data.batch["old_log_probs"]
+    aug_log_probs = data.batch["aug_log_probs"]
+    if old_log_probs.shape != aug_log_probs.shape:
+        raise ValueError(
+            f"old_log_probs shape {tuple(old_log_probs.shape)} does not match "
+            f"aug_log_probs shape {tuple(aug_log_probs.shape)}"
+        )
+
+    response_mask = data.batch.get("response_mask")
+    if response_mask is None:
+        response_mask = compute_response_mask(data)
+        data.batch["response_mask"] = response_mask
+    response_mask = response_mask.to(device=old_log_probs.device)
+    mask = response_mask.to(dtype=old_log_probs.dtype)
+    valid_lengths = mask.sum(dim=-1)
+    valid_response = valid_lengths > 0
+
+    raw_visual_dep = ((old_log_probs - aug_log_probs).detach() * mask).sum(dim=-1) / valid_lengths.clamp_min(1.0)
+    raw_visual_dep = torch.where(valid_response, raw_visual_dep, torch.zeros_like(raw_visual_dep))
+    if raw_clip and raw_clip > 0:
+        raw_visual_dep = torch.clamp(raw_visual_dep, min=-float(raw_clip), max=float(raw_clip))
+
+    token_level_scores = data.batch["token_level_scores"].clone()
+    last_index, valid_last_token = _last_response_token_index(response_mask)
+    valid_last_token = valid_last_token.to(device=token_level_scores.device)
+    row_index = torch.arange(token_level_scores.size(0), device=token_level_scores.device)
+    last_index = last_index.to(device=token_level_scores.device)
+    base_last_scores = token_level_scores[row_index, last_index].detach().clone()
+    base_sequence_scores = token_level_scores.detach().sum(dim=-1).to(device=raw_visual_dep.device)
+    answer_valid = valid_response
+    if valid_answer_only:
+        # TTRL/TTRV reward functions assign zero total reward to unparsable candidates.
+        answer_valid = valid_response & (base_sequence_scores > 0)
+
+    visual_dep_z, group_count, active_group_count = _group_zscore_by_uid(
+        raw_visual_dep,
+        data.non_tensor_batch["uid"],
+        answer_valid,
+    )
+    if z_clip and z_clip > 0:
+        visual_dep_z = torch.clamp(visual_dep_z, min=-float(z_clip), max=float(z_clip))
+
+    visual_dep_reward = (
+        float(coef)
+        * visual_dep_z.to(device=token_level_scores.device, dtype=token_level_scores.dtype)
+        * answer_valid.to(device=token_level_scores.device, dtype=token_level_scores.dtype)
+        * valid_last_token.to(dtype=token_level_scores.dtype)
+    )
+    token_level_scores[row_index, last_index] = token_level_scores[row_index, last_index] + visual_dep_reward
+    data.batch["token_level_scores"] = token_level_scores
+    if store_details:
+        data.batch["visual_dep_raw"] = raw_visual_dep.detach()
+        data.batch["visual_dep_z"] = visual_dep_z.detach()
+        data.batch["visual_dep_bonus"] = visual_dep_reward.detach().to(device=raw_visual_dep.device)
+        data.batch["visual_dep_answer_valid"] = answer_valid.detach()
+        data.batch["visual_dep_base_sequence_score"] = base_sequence_scores.detach()
+
+    valid_for_metrics = answer_valid.to(device=raw_visual_dep.device)
+    raw_valid = raw_visual_dep[valid_for_metrics]
+    z_valid = visual_dep_z[valid_for_metrics]
+    base_valid = base_sequence_scores[valid_for_metrics]
+    metrics = {
+        "reward/visual_dep_coef": float(coef),
+        "reward/visual_dep_valid_answer_only": float(bool(valid_answer_only)),
+        "reward/visual_dep_raw_mean": _safe_tensor_mean(raw_valid),
+        "reward/visual_dep_raw_std": _safe_tensor_std(raw_valid),
+        "reward/visual_dep_raw_min": _safe_tensor_min(raw_valid),
+        "reward/visual_dep_raw_max": _safe_tensor_max(raw_valid),
+        "reward/visual_dep_z_mean": _safe_tensor_mean(z_valid),
+        "reward/visual_dep_z_std": _safe_tensor_std(z_valid),
+        "reward/visual_dep_z_abs_mean": _safe_tensor_mean(z_valid.abs()),
+        "reward/visual_dep_corr_density": _pearson_corr(
+            visual_dep_z,
+            base_sequence_scores,
+            valid_for_metrics,
+        ),
+        "reward/visual_dep_valid_ratio": float(valid_for_metrics.float().mean().detach().item()),
+        "reward/visual_dep_answer_valid_ratio": float(answer_valid.float().mean().detach().item()),
+        "reward/visual_dep_answer_invalid_ratio": float((valid_response & ~answer_valid).float().mean().detach().item()),
+        "reward/visual_dep_group_count": float(group_count),
+        "reward/visual_dep_active_group_count": float(active_group_count),
+        "reward/visual_dep_density_mean": _safe_tensor_mean(base_valid),
+    }
+    return data, metrics
+
+
+def _bool_env_flag(name: str, default: str = "0") -> bool:
+    return str(os.environ.get(name, default)).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _attach_eval_selection_scores(trainer, batch: DataProto, metric_prefix: str = "val-selection"):
+    """Attach reward-style scores and optional visual-dep scores for selection-only validation."""
+    reward_style = trainer.config.reward_model.reward_kwargs.get("reward_style", None)
+    batch.batch["response_mask"] = compute_response_mask(batch)
+
+    use_density_embeddings = bool(trainer.use_ttrl and reward_style in DENSITY_EMBEDDING_REWARD_STYLES)
+    use_response_embeddings = bool(
+        trainer.use_ttrl
+        and (
+            reward_style in {"feature_center_hard", "feature_center_hsr"}
+            or use_density_embeddings
+        )
+    )
+    density_embedding_scope = str(
+        trainer.config.reward_model.reward_kwargs.get("density_embedding_scope", "response_mean_pool")
+    )
+    batch.meta_info["return_response_embeddings"] = use_response_embeddings
+    old_log_prob = trainer.actor_rollout_wg.compute_log_prob(batch)
+    batch = batch.union(old_log_prob)
+
+    metrics = {}
+    if use_density_embeddings:
+        evidence_scopes = {
+            "evidence_query_mean_pool",
+            "canonical_evidence_query_mean_pool",
+            "canonical_option_query_mean_pool",
+        }
+        if density_embedding_scope in evidence_scopes:
+            canonicalize_evidence = density_embedding_scope in {
+                "canonical_evidence_query_mean_pool",
+                "canonical_option_query_mean_pool",
+            }
+            if density_embedding_scope == "canonical_option_query_mean_pool":
+                default_evidence_template = _DENSITY_CANONICAL_OPTION_DEFAULT_TEMPLATE
+            elif canonicalize_evidence:
+                default_evidence_template = _DENSITY_CANONICAL_EVIDENCE_DEFAULT_TEMPLATE
+            else:
+                default_evidence_template = _DENSITY_EVIDENCE_DEFAULT_TEMPLATE
+            evidence_template = trainer.config.reward_model.reward_kwargs.get(
+                "density_evidence_template", default_evidence_template
+            )
+            evidence_batch, evidence_queries, evidence_token_lengths = _build_density_evidence_query_batch(
+                batch=batch,
+                tokenizer=trainer.tokenizer,
+                template=evidence_template,
+                canonicalize=canonicalize_evidence,
+            )
+            evidence_log_prob = trainer.actor_rollout_wg.compute_log_prob(evidence_batch)
+            batch.batch["response_embeddings"] = evidence_log_prob.batch["response_embeddings"]
+            batch.non_tensor_batch["density_evidence_query"] = np.array(evidence_queries, dtype=object)
+            if evidence_token_lengths:
+                metrics[f"{metric_prefix}/density_evidence_query_token_mean"] = float(np.mean(evidence_token_lengths))
+                metrics[f"{metric_prefix}/density_evidence_query_token_max"] = float(np.max(evidence_token_lengths))
+        elif density_embedding_scope in {"response_mean_pool", "full_response_mean_pool"}:
+            batch.non_tensor_batch["density_evidence_query"] = np.array([""] * len(batch), dtype=object)
+        else:
+            raise ValueError(f"Unsupported density_embedding_scope={density_embedding_scope}")
+
+    use_visual_dep = bool(trainer.config.algorithm.get("use_visual_dep_reward", False))
+    batch.meta_info["selection_eval_defer_write"] = use_visual_dep
+    reward_result = trainer.val_reward_fn(batch, return_dict=True)
+    reward_tensor = reward_result["reward_tensor"]
+
+    if use_visual_dep:
+        if not trainer.config.actor_rollout_ref.actor.get("use_papo_prcp_loss", False):
+            raise ValueError(
+                "TTRL_SELECTION_EVAL with visual-dep selection requires "
+                "actor_rollout_ref.actor.use_papo_prcp_loss=true"
+            )
+        batch.batch["token_level_scores"] = reward_tensor
+        repeat_n = int(trainer.config.actor_rollout_ref.rollout.val_kwargs.n)
+        if repeat_n <= 0:
+            repeat_n = len(batch)
+        if "uid" not in batch.non_tensor_batch:
+            uid_rows = [f"eval-{trainer.global_steps}-{row // repeat_n}" for row in range(len(batch))]
+            batch.non_tensor_batch["uid"] = np.array(uid_rows, dtype=object)
+
+        papo_cf_mode = str(trainer.config.data.get("papo_cf_mode", "pixel")).lower().strip()
+        metrics[f"{metric_prefix}/papo_cf_mode_attention"] = float(papo_cf_mode == "attention")
+        if papo_cf_mode == "attention":
+            papo_aug_batch = batch.select(
+                batch_keys=["responses", "input_ids", "attention_mask", "position_ids"],
+                non_tensor_batch_keys=["multi_modal_inputs"],
+            )
+            papo_aug_batch.meta_info = deepcopy(batch.meta_info)
+            papo_aug_batch.meta_info["return_response_embeddings"] = False
+            papo_aug_batch.meta_info["papo_attn_cf_ratio"] = float(trainer.config.data.get("papo_attn_cf_ratio", 0.6))
+            papo_aug_batch.meta_info["papo_attn_cf_cut_iv"] = bool(trainer.config.data.get("papo_attn_cf_cut_iv", False))
+            papo_aug_batch.meta_info["papo_attn_cf_style"] = str(trainer.config.data.get("papo_attn_cf_style", "hard_cut"))
+            papo_aug_batch.meta_info["papo_attn_cf_scale"] = float(trainer.config.data.get("papo_attn_cf_scale", 0.3))
+            aug_log_prob = trainer.actor_rollout_wg.compute_attn_cf_log_prob(papo_aug_batch)
+            batch.batch["aug_log_probs"] = aug_log_prob.batch["old_log_probs"]
+            for key, value in aug_log_prob.meta_info.items():
+                if key.startswith("papo_attn_cf_"):
+                    metrics[f"{metric_prefix}/{key}"] = float(value)
+        elif papo_cf_mode in ("pixel", "random_patch", "masked_image"):
+            papo_masked_inputs, papo_mask_metadata = _build_papo_masked_multi_modal_inputs(
+                batch=batch,
+                processor=trainer.processor,
+                patch_size=trainer.config.data.get("papo_mask_patch_size", 14),
+                black_prob=trainer.config.data.get("papo_mask_prob", 0.6),
+                global_step=trainer.global_steps,
+                mask_type=trainer.config.data.get("papo_mask_type", "black"),
+            )
+            papo_aug_batch = batch.select(
+                batch_keys=["responses", "input_ids", "attention_mask", "position_ids"],
+                non_tensor_batch_keys=["multi_modal_inputs"],
+            )
+            papo_aug_batch.non_tensor_batch["multi_modal_inputs"] = papo_masked_inputs
+            papo_aug_batch.meta_info = deepcopy(batch.meta_info)
+            papo_aug_batch.meta_info["return_response_embeddings"] = False
+            aug_log_prob = trainer.actor_rollout_wg.compute_log_prob(papo_aug_batch)
+            batch.batch["aug_log_probs"] = aug_log_prob.batch["old_log_probs"]
+            mask_ratios = [
+                metadata.get("papo_mask_blackened_ratio", 0.0)
+                for metadata in papo_mask_metadata
+                if isinstance(metadata, dict)
+            ]
+            if mask_ratios:
+                metrics[f"{metric_prefix}/papo_mask_blackened_ratio"] = float(np.mean(mask_ratios))
+        else:
+            raise ValueError(f"Unsupported PAPO counterfactual mode {papo_cf_mode!r}")
+
+        batch, visual_dep_metrics = apply_visual_dependency_reward(
+            batch,
+            coef=float(trainer.config.algorithm.get("visual_dep_coef", 0.2)),
+            raw_clip=float(trainer.config.algorithm.get("visual_dep_raw_clip", 20.0)),
+            z_clip=float(trainer.config.algorithm.get("visual_dep_z_clip", 3.0)),
+            valid_answer_only=bool(trainer.config.algorithm.get("visual_dep_valid_answer_only", False)),
+            store_details=True,
+        )
+        metrics.update({f"{metric_prefix}/{key.split('/', 1)[-1]}": value for key, value in visual_dep_metrics.items()})
+        batch.meta_info["selection_eval_defer_write"] = False
+        reward_result = trainer.val_reward_fn(batch, return_dict=True)
+
+    return batch, reward_result, metrics
+
+
 def compute_response_mask(data: DataProto):
     responses = data.batch["responses"]
     response_length = responses.size(1)
@@ -1033,6 +1365,41 @@ class RayPPOTrainer:
             self.config.actor_rollout_ref.actor.optim.total_training_steps = total_training_steps
             self.config.critic.optim.total_training_steps = total_training_steps
 
+    def _build_validation_metric_inputs(self, test_batch, input_texts, sample_offset=0):
+        """Build stable per-example keys for validation metric aggregation.
+
+        The generic validation reducer groups samples by the provided input key.
+        Prompt text alone is not unique for many vision datasets, especially
+        OCRBench where many different images share the same question text.  Use
+        dataset metadata to keep different images/questions separate while still
+        grouping repeated validation samples from the same example together.
+        """
+        extra_infos = test_batch.non_tensor_batch.get("extra_info", [None] * len(input_texts))
+        data_sources = test_batch.non_tensor_batch.get("data_source", ["unknown"] * len(input_texts))
+        try:
+            repeat_n = int(self.config.actor_rollout_ref.rollout.val_kwargs.n)
+        except Exception:
+            repeat_n = 1
+        repeat_n = max(repeat_n, 1)
+
+        metric_inputs = []
+        for sample_i, input_text in enumerate(input_texts):
+            global_sample_i = sample_offset + sample_i
+            extra_info = extra_infos[sample_i] if sample_i < len(extra_infos) else None
+            data_source = data_sources[sample_i] if sample_i < len(data_sources) else "unknown"
+            key_parts = []
+            if isinstance(extra_info, dict):
+                for field in ("index", "question_id", "id", "image_path", "image_id", "image"):
+                    value = extra_info.get(field)
+                    if value is not None:
+                        key_parts.append(f"{field}={value}")
+            if not key_parts:
+                key_parts.append(f"row={global_sample_i // repeat_n}")
+
+            metric_inputs.append(f"{input_text}\n__metric_instance__:{data_source}:{'|'.join(map(str, key_parts))}")
+
+        return metric_inputs
+
     def _maybe_log_val_generations(self, inputs, outputs, scores):
         """Log a table of validation samples to the configured logger (wandb or swanlab)"""
 
@@ -1064,6 +1431,7 @@ class RayPPOTrainer:
 
         # Lists to collect samples for the table
         sample_inputs = []
+        metric_inputs = []
         # kamla
         # sample_outputs = []
         sample_scores = []
@@ -1085,6 +1453,7 @@ class RayPPOTrainer:
             # TODO: Can we keep special tokens except for padding tokens?
             input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
             sample_inputs.extend(input_texts)
+            metric_inputs.extend(self._build_validation_metric_inputs(test_batch, input_texts, sample_offset=len(metric_inputs)))
 
             if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
                 test_gen_batch = test_batch.pop(
@@ -1122,7 +1491,11 @@ class RayPPOTrainer:
             test_batch = test_batch.union(test_output_gen_batch)
 
             # evaluate using reward_function
-            result = self.val_reward_fn(test_batch, return_dict=True)
+            if _bool_env_flag("TTRL_SELECTION_EVAL"):
+                test_batch, result, selection_metrics = _attach_eval_selection_scores(self, test_batch)
+            else:
+                result = self.val_reward_fn(test_batch, return_dict=True)
+                selection_metrics = {}
             reward_tensor = result["reward_tensor"]
             scores = reward_tensor.sum(-1).cpu().tolist()
             sample_scores.extend(scores)
@@ -1140,8 +1513,9 @@ class RayPPOTrainer:
             assert len(lst) == 0 or len(lst) == len(sample_scores), f"{key_info}: {len(lst)=}, {len(sample_scores)=}"
 
         data_sources = np.concatenate(data_source_lst, axis=0)
+        assert len(metric_inputs) == len(sample_scores), f"{len(metric_inputs)=}, {len(sample_scores)=}"
 
-        data_src2var2metric2val = process_validation_metrics(data_sources, sample_inputs, reward_extra_infos_dict)
+        data_src2var2metric2val = process_validation_metrics(data_sources, metric_inputs, reward_extra_infos_dict)
         metric_dict = {}
         for data_source, var2metric2val in data_src2var2metric2val.items():
             core_var = "acc" if "acc" in var2metric2val else "reward"
@@ -1163,6 +1537,9 @@ class RayPPOTrainer:
         if self.use_ttrl and "ttrl_info" in result:
             for key, val in result["ttrl_info"].items():
                 metric_dict[f"val-ttrl/{key}"] = val
+        if _bool_env_flag("TTRL_SELECTION_EVAL"):
+            for key, val in selection_metrics.items():
+                metric_dict[key] = val
 
         return metric_dict
 
@@ -1172,6 +1549,7 @@ class RayPPOTrainer:
 
         # Lists to collect samples for the table
         sample_inputs = []
+        metric_inputs = []
         sample_outputs = []
         sample_scores = []
 
@@ -1192,6 +1570,7 @@ class RayPPOTrainer:
             # TODO: Can we keep special tokens except for padding tokens?
             input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
             sample_inputs.extend(input_texts)
+            metric_inputs.extend(self._build_validation_metric_inputs(test_batch, input_texts, sample_offset=len(metric_inputs)))
 
             if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
                 test_gen_batch = test_batch.pop(
@@ -1229,7 +1608,11 @@ class RayPPOTrainer:
             test_batch = test_batch.union(test_output_gen_batch)
 
             # evaluate using reward_function
-            result = self.val_reward_fn(test_batch, return_dict=True)
+            if _bool_env_flag("TTRL_SELECTION_EVAL"):
+                test_batch, result, selection_metrics = _attach_eval_selection_scores(self, test_batch)
+            else:
+                result = self.val_reward_fn(test_batch, return_dict=True)
+                selection_metrics = {}
             reward_tensor = result["reward_tensor"]
             scores = reward_tensor.sum(-1).cpu().tolist()
             sample_scores.extend(scores)
@@ -1247,8 +1630,9 @@ class RayPPOTrainer:
             assert len(lst) == 0 or len(lst) == len(sample_scores), f"{key_info}: {len(lst)=}, {len(sample_scores)=}"
 
         data_sources = np.concatenate(data_source_lst, axis=0)
+        assert len(metric_inputs) == len(sample_scores), f"{len(metric_inputs)=}, {len(sample_scores)=}"
 
-        data_src2var2metric2val = process_validation_metrics(data_sources, sample_inputs, reward_extra_infos_dict)
+        data_src2var2metric2val = process_validation_metrics(data_sources, metric_inputs, reward_extra_infos_dict)
         metric_dict = {}
         for data_source, var2metric2val in data_src2var2metric2val.items():
             core_var = "acc" if "acc" in var2metric2val else "reward"
@@ -1270,6 +1654,9 @@ class RayPPOTrainer:
         if self.use_ttrl and "ttrl_info" in result:
             for key, val in result["ttrl_info"].items():
                 metric_dict[f"val-ttrl/{key}"] = val
+        if _bool_env_flag("TTRL_SELECTION_EVAL"):
+            for key, val in selection_metrics.items():
+                metric_dict[key] = val
 
         return metric_dict
 
@@ -1452,9 +1839,16 @@ class RayPPOTrainer:
         )
         # load critic
         if self.use_critic:
-            self.critic_wg.load_checkpoint(
-                critic_path, del_local_after_load=self.config.trainer.del_local_ckpt_after_load
-            )
+            allow_missing_critic = self.config.trainer.get("allow_missing_critic_ckpt", False)
+            if os.path.exists(critic_path) or not allow_missing_critic:
+                self.critic_wg.load_checkpoint(
+                    critic_path, del_local_after_load=self.config.trainer.del_local_ckpt_after_load
+                )
+            else:
+                print(
+                    f"Warning: No critic checkpoint found at {critic_path}; "
+                    "skipping critic load because trainer.allow_missing_critic_ckpt=True"
+                )
 
         # load dataloader,
         # TODO: from remote not implemented yet
@@ -1870,6 +2264,21 @@ class RayPPOTrainer:
                                             loss_agg_mode=loss_agg_mode,
                                         ).detach().item()
                                     )
+
+                        if self.config.algorithm.get("use_visual_dep_reward", False):
+                            if not self.config.actor_rollout_ref.actor.get("use_papo_prcp_loss", False):
+                                raise ValueError(
+                                    "algorithm.use_visual_dep_reward=true requires "
+                                    "actor_rollout_ref.actor.use_papo_prcp_loss=true"
+                                )
+                            batch, visual_dep_metrics = apply_visual_dependency_reward(
+                                batch,
+                                coef=float(self.config.algorithm.get("visual_dep_coef", 0.2)),
+                                raw_clip=float(self.config.algorithm.get("visual_dep_raw_clip", 20.0)),
+                                z_clip=float(self.config.algorithm.get("visual_dep_z_clip", 3.0)),
+                                valid_answer_only=bool(self.config.algorithm.get("visual_dep_valid_answer_only", False)),
+                            )
+                            metrics.update(visual_dep_metrics)
 
                         print(f"{list(reward_extra_infos_dict.keys())=}")
                         if reward_extra_infos_dict:

@@ -224,6 +224,11 @@ algorithm:
   lam: 1.0
   adv_estimator: gae
   use_kl_in_reward: False
+  use_visual_dep_reward: False
+  visual_dep_coef: 0.2
+  visual_dep_raw_clip: 20.0
+  visual_dep_z_clip: 3.0
+  visual_dep_valid_answer_only: False
   kl_penalty: kl  # how to estimate kl divergence
   kl_ctrl:
     type: fixed

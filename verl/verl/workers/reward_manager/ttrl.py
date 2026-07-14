@@ -93,6 +93,7 @@ class TTRLRewardManager:
         self.numeric_kernel_sigma = numeric_kernel_sigma
         self.numeric_trim_ratio = numeric_trim_ratio
         self.answer_choice_labels = answer_choice_labels
+        self.selection_eval = os.environ.get("TTRL_SELECTION_EVAL", "0").lower() in {"1", "true", "yes", "on"}
         self.log_response_embeddings = os.environ.get("TTRL_LOG_RESPONSE_EMBEDDINGS", "0") == "1"
         self._train_dump_call = 0
         self._eval_dump_call = 0
@@ -170,6 +171,36 @@ class TTRLRewardManager:
     def _write_train_rollouts(self, record):
         self._write_jsonl(os.environ.get("TTRL_TRAIN_ROLLOUT_JSONL"), [record])
 
+    def _reward_selection_summary(self, group):
+        def score_of(record):
+            for key in ("final_selection_reward", "selection_reward", "reward"):
+                value = record.get(key)
+                if value is not None:
+                    try:
+                        return float(value)
+                    except (TypeError, ValueError):
+                        pass
+            return float("-inf")
+
+        if not group:
+            return {}
+        scores = [score_of(record) for record in group]
+        best_score = max(scores)
+        best_indices = [idx for idx, score in enumerate(scores) if abs(score - best_score) <= 1e-8]
+        best_index = best_indices[0]
+        best_record = group[best_index]
+        sorted_scores = sorted(scores, reverse=True)
+        margin = sorted_scores[0] - sorted_scores[1] if len(sorted_scores) > 1 else 0.0
+        return {
+            "reward_selection_sample_index": int(best_index),
+            "reward_selection_prediction": best_record.get("prediction"),
+            "reward_selection_response_raw": best_record.get("response_raw"),
+            "reward_selection_correct": bool(best_record.get("correct")),
+            "reward_selection_score": float(best_score),
+            "reward_selection_margin": float(margin),
+            "reward_selection_tie_count": int(len(best_indices)),
+        }
+
     def _write_eval_groups(self, records):
         output_path = os.environ.get("TTRL_EVAL_GROUP_OUTPUT_JSONL")
         if not output_path or self.eval_n_samples <= 1:
@@ -183,6 +214,13 @@ class TTRLRewardManager:
                 continue
             predictions = [record.get("prediction") for record in group]
             summary = self._prediction_summary(predictions, group[0].get("ground_truth"))
+            reward_summary = self._reward_selection_summary(group)
+            pass_at_n = any(bool(record.get("correct")) for record in group)
+            majority_correct = bool(
+                _normalize_choice_answer(summary.get("majority_prediction"), choice_labels=self.answer_choice_labels)
+                == _normalize_choice_answer(group[0].get("ground_truth"), choice_labels=self.answer_choice_labels)
+            )
+            invalid_count = sum(1 for prediction in predictions if str(prediction).strip().lower() == "unknown")
             grouped_records.append(
                 {
                     "eval_dump_call": self._eval_dump_call,
@@ -196,12 +234,26 @@ class TTRLRewardManager:
                     "single_prediction": group[0].get("prediction"),
                     "single_correct": group[0].get("correct"),
                     **summary,
+                    "majority_correct": majority_correct,
+                    "invalid_count": int(invalid_count),
+                    "invalid_ratio": float(invalid_count / len(group)) if group else 0.0,
+                    **reward_summary,
+                    "pass_at_n": bool(pass_at_n),
+                    "major_reward_agreement": bool(
+                        reward_summary.get("reward_selection_prediction") == summary.get("majority_prediction")
+                    ),
                     "samples": [
                         {
                             "sample_index": sample_i,
                             "response_raw": record.get("response_raw"),
                             "prediction": record.get("prediction"),
                             "reward": record.get("reward"),
+                            "selection_reward": record.get("selection_reward"),
+                            "base_reward": record.get("base_reward"),
+                            "visual_dep_raw": record.get("visual_dep_raw"),
+                            "visual_dep_z": record.get("visual_dep_z"),
+                            "visual_dep_bonus": record.get("visual_dep_bonus"),
+                            "final_selection_reward": record.get("final_selection_reward"),
                             "correct": record.get("correct"),
                             "response_token_len": record.get("response_token_len"),
                         }
@@ -690,7 +742,212 @@ class TTRLRewardManager:
                     ttrl_info[k] = v
             return reward_tensor, reward_extra_info, ttrl_info
 
+    def _batch_float_value(self, data, key, index, default=None):
+        if key not in data.batch.keys():
+            return default
+        value = data.batch[key][index]
+        try:
+            return float(value.detach().cpu().item())
+        except Exception:
+            try:
+                return float(value)
+            except Exception:
+                return default
+
+    def _compute_selection_eval_reward(self, data: DataProto):
+            reward_extra_info = defaultdict(list)
+            ttrl_info = {}
+            reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
+            eval_records = []
+            all_ttrl_metrics = defaultdict(list)
+            all_selection_metrics = defaultdict(list)
+            prompt_num = len(data) // self.eval_n_samples
+            defer_write = bool(data.meta_info.get("selection_eval_defer_write", False))
+
+            for prompt_i in range(prompt_num):
+                group_pred_outputs = []
+                group_labels = []
+                group_extra_info = []
+                group_response_lengths = []
+                group_response_embeddings = []
+                group_density_evidence_queries = []
+                group_data_source = None
+                group_prompt_str = None
+                task = None
+
+                for i in range(self.eval_n_samples):
+                    row = prompt_i * self.eval_n_samples + i
+                    data_item = data[row]
+                    prompt_idx = data_item.batch["prompts"]
+                    prompt_length = prompt_idx.shape[-1]
+                    valid_prompt_length = data_item.batch["attention_mask"][:prompt_length].sum()
+                    valid_prompt_idx = prompt_idx[-valid_prompt_length:]
+                    response_idx = data_item.batch["responses"]
+                    valid_response_length = data_item.batch["attention_mask"][prompt_length:].sum()
+                    valid_response_idx = response_idx[:valid_response_length]
+
+                    prompt_str = self.tokenizer.decode(valid_prompt_idx, skip_special_tokens=False)
+                    response_str = self.tokenizer.decode(valid_response_idx, skip_special_tokens=False)
+                    ground_truth = data_item.non_tensor_batch["reward_model"]["ground_truth"]
+                    data_source = data_item.non_tensor_batch[self.reward_fn_key]
+                    extra_info = data_item.non_tensor_batch["extra_info"]
+                    if group_prompt_str is None:
+                        group_prompt_str = prompt_str
+                    if group_data_source is None:
+                        group_data_source = data_source
+                    if task is None:
+                        task = self._data_source_to_task(data_source)
+                    elif task != self._data_source_to_task(data_source):
+                        raise NotImplementedError(
+                            f"Non consistent task {task} and {self._data_source_to_task(data_source)} for TTRLRewardManager"
+                        )
+                    if self.reward_style in {"feature_center_hard", "feature_center_hsr"} or self.reward_style in DENSITY_REWARD_STYLES:
+                        if "response_embeddings" not in data_item.batch:
+                            raise ValueError(f"{self.reward_style} selection eval requires response_embeddings in batch")
+                        group_response_embeddings.append(data_item.batch["response_embeddings"].detach().cpu().float().numpy())
+                        group_density_evidence_queries.append(data_item.non_tensor_batch.get("density_evidence_query", ""))
+                    group_pred_outputs.append(response_str)
+                    group_labels.append(ground_truth)
+                    group_extra_info.append(extra_info)
+                    group_response_lengths.append(int(valid_response_length))
+
+                metric_result = test_time_train_metrics(
+                    group_pred_outputs,
+                    group_labels,
+                    task=task,
+                    extra_info=group_extra_info,
+                    reward_style=self.reward_style,
+                    soft_label_gamma=self.soft_label_gamma,
+                    unknown_reward=self.unknown_reward,
+                    all_unknown_reward=self.all_unknown_reward,
+                    entropy_coef=self.entropy_coef,
+                    answer_parse_mode=self.answer_parse_mode,
+                    response_embeddings=(
+                        group_response_embeddings
+                        if self.reward_style in {"feature_center_hard", "feature_center_hsr"} or self.reward_style in DENSITY_REWARD_STYLES
+                        else None
+                    ),
+                    feature_center_hsr_alpha=self.feature_center_hsr_alpha,
+                    feature_center_hsr_beta=self.feature_center_hsr_beta,
+                    entropy_temperature_version=self.entropy_temperature_version,
+                    entropy_temperature_tau0=self.entropy_temperature_tau0,
+                    entropy_temperature_gamma=self.entropy_temperature_gamma,
+                    entropy_temperature_lambda=self.entropy_temperature_lambda,
+                    entropy_temperature_tau_min=self.entropy_temperature_tau_min,
+                    density_temperature_t0=self.density_temperature_t0,
+                    density_temperature_t_min=self.density_temperature_t_min,
+                    density_temperature_t_max=self.density_temperature_t_max,
+                    density_embedding_scope=self.density_embedding_scope,
+                    numeric_kernel_sigma=self.numeric_kernel_sigma,
+                    numeric_trim_ratio=self.numeric_trim_ratio,
+                    answer_choice_labels=self.answer_choice_labels,
+                    return_details=True,
+                )
+                base_rewards, ttrl_metrics, details = metric_result
+                predictions = details.get("original_answers")
+                if not predictions:
+                    predictions = _extract_answers(
+                        task,
+                        group_pred_outputs,
+                        group_labels[0] if group_labels else None,
+                        extra_info=group_extra_info,
+                        answer_parse_mode=self.answer_parse_mode,
+                        choice_labels=self.answer_choice_labels,
+                    )
+
+                selection_rewards = []
+                true_rewards = []
+                for i in range(self.eval_n_samples):
+                    row = prompt_i * self.eval_n_samples + i
+                    base_reward = float(base_rewards[i])
+                    visual_bonus = self._batch_float_value(data, "visual_dep_bonus", row, 0.0) or 0.0
+                    final_reward = base_reward + visual_bonus
+                    if "token_level_scores" in data.batch.keys() and "visual_dep_bonus" in data.batch.keys():
+                        final_reward = float(data.batch["token_level_scores"][row].detach().sum().cpu().item())
+                    selection_rewards.append(float(final_reward))
+                    prediction = predictions[i]
+                    label = group_labels[i]
+                    correct = bool(
+                        _normalize_choice_answer(prediction, choice_labels=self.answer_choice_labels)
+                        == _normalize_choice_answer(label, choice_labels=self.answer_choice_labels)
+                    )
+                    true_rewards.append(float(correct))
+                    last_index = max(0, group_response_lengths[i] - 1)
+                    reward_tensor[row, last_index] = float(final_reward)
+                    record = {
+                        "eval_dump_call": self._eval_dump_call,
+                        "batch_index": row,
+                        "group_index": prompt_i,
+                        "sample_index": i,
+                        "index": group_extra_info[i].get("index") if isinstance(group_extra_info[i], dict) else None,
+                        "data_source": group_data_source,
+                        "ground_truth": label,
+                        "prompt": group_prompt_str,
+                        "response_raw": group_pred_outputs[i],
+                        "response_token_len": group_response_lengths[i],
+                        "extra_info": group_extra_info[i],
+                        "prediction": prediction,
+                        "correct": correct,
+                        "reward": float(final_reward),
+                        "selection_reward": float(final_reward),
+                        "base_reward": base_reward,
+                        "visual_dep_raw": self._batch_float_value(data, "visual_dep_raw", row),
+                        "visual_dep_z": self._batch_float_value(data, "visual_dep_z", row),
+                        "visual_dep_bonus": self._batch_float_value(data, "visual_dep_bonus", row, 0.0),
+                        "visual_dep_answer_valid": bool(self._batch_float_value(data, "visual_dep_answer_valid", row, 0.0) or 0.0),
+                        "final_selection_reward": float(final_reward),
+                    }
+                    if i < len(group_density_evidence_queries):
+                        record["density_evidence_query"] = group_density_evidence_queries[i]
+                    eval_records.append(record)
+
+                selection_idx = int(np.argmax(selection_rewards)) if selection_rewards else -1
+                majority_summary = self._prediction_summary(predictions, group_labels[0] if group_labels else None)
+                reward_selection_correct = bool(true_rewards[selection_idx]) if selection_idx >= 0 else False
+                majority_correct = bool(
+                    _normalize_choice_answer(majority_summary.get("majority_prediction"), choice_labels=self.answer_choice_labels)
+                    == _normalize_choice_answer(group_labels[0], choice_labels=self.answer_choice_labels)
+                ) if group_labels else False
+                all_selection_metrics["selection_reward_accuracy"].append(float(reward_selection_correct))
+                all_selection_metrics["selection_majority_accuracy"].append(float(majority_correct))
+                all_selection_metrics[f"selection_pass@{self.eval_n_samples}"].append(float(any(true_rewards)))
+                all_selection_metrics["selection_major_reward_agreement"].append(
+                    float(predictions[selection_idx] == majority_summary.get("majority_prediction")) if selection_idx >= 0 else 0.0
+                )
+                if selection_rewards:
+                    sorted_rewards = sorted(selection_rewards, reverse=True)
+                    margin = sorted_rewards[0] - sorted_rewards[1] if len(sorted_rewards) > 1 else 0.0
+                    all_selection_metrics["selection_reward_margin"].append(float(margin))
+                    all_selection_metrics["selection_reward_tie"].append(
+                        float(sum(abs(value - sorted_rewards[0]) <= 1e-8 for value in selection_rewards) > 1)
+                    )
+                for k, v in ttrl_metrics.items():
+                    all_ttrl_metrics[k].append(v)
+
+            if not defer_write:
+                self._write_eval_outputs(eval_records)
+                self._write_eval_groups(eval_records)
+                if not os.environ.get("TTRL_EVAL_GROUP_OUTPUT_JSONL") or self.eval_n_samples <= 1:
+                    self._eval_dump_call += 1
+
+            for record in eval_records:
+                reward_extra_info["acc"].append(float(record.get("correct", False)))
+                reward_extra_info["selection_reward"].append(float(record.get("selection_reward", 0.0)))
+                reward_extra_info["base_reward"].append(float(record.get("base_reward", 0.0)))
+                reward_extra_info["visual_dep_bonus"].append(float(record.get("visual_dep_bonus") or 0.0))
+
+            for k, v in all_ttrl_metrics.items():
+                if isinstance(v, list):
+                    ttrl_info[k] = float(np.mean(v))
+            for k, v in all_selection_metrics.items():
+                if isinstance(v, list):
+                    ttrl_info[k] = float(np.mean(v))
+            return reward_tensor, reward_extra_info, ttrl_info
+
     def _compute_eval_reward(self, data: DataProto):
+
+            if self.selection_eval:
+                return self._compute_selection_eval_reward(data)
 
             reward_extra_info = defaultdict(list)
             ttrl_info = {}

@@ -79,6 +79,11 @@ PAPO_ATTN_CF_RATIO="${PAPO_ATTN_CF_RATIO:-0.6}"
 PAPO_ATTN_CF_CUT_IV="${PAPO_ATTN_CF_CUT_IV:-false}"
 PAPO_ATTN_CF_STYLE="${PAPO_ATTN_CF_STYLE:-hard_cut}"
 PAPO_ATTN_CF_SCALE="${PAPO_ATTN_CF_SCALE:-0.3}"
+USE_VISUAL_DEP_REWARD="${USE_VISUAL_DEP_REWARD:-false}"
+VISUAL_DEP_COEF="${VISUAL_DEP_COEF:-0.2}"
+VISUAL_DEP_RAW_CLIP="${VISUAL_DEP_RAW_CLIP:-20.0}"
+VISUAL_DEP_Z_CLIP="${VISUAL_DEP_Z_CLIP:-3.0}"
+VISUAL_DEP_VALID_ONLY="${VISUAL_DEP_VALID_ONLY:-false}"
 ACTOR_KL_LOSS_COEF="${ACTOR_KL_LOSS_COEF:-0.001}"
 ACTOR_CLIP_RATIO_LOW="${ACTOR_CLIP_RATIO_LOW:-0.2}"
 ACTOR_CLIP_RATIO_HIGH="${ACTOR_CLIP_RATIO_HIGH:-0.2}"
@@ -100,6 +105,7 @@ echo "[run] density_temperature t0=$DENSITY_TEMPERATURE_T0 t_min=$DENSITY_TEMPER
 echo "[run] numeric_reward kernel_sigma=$NUMERIC_KERNEL_SIGMA trim_ratio=$NUMERIC_TRIM_RATIO"
 echo "[run] papo use=$USE_PAPO_PRCP_LOSS valid_only=$PAPO_VALID_ONLY coef=$PAPO_KL_PRCP_COEF clip=$PAPO_KL_PRCP_CLIP entropy_coef=$PAPO_ORI_ENTROPY_COEF cf_mode=$PAPO_CF_MODE mask_type=$PAPO_MASK_TYPE mask_patch=$PAPO_MASK_PATCH_SIZE mask_prob=$PAPO_MASK_PROB attn_ratio=$PAPO_ATTN_CF_RATIO attn_cut_iv=$PAPO_ATTN_CF_CUT_IV attn_style=$PAPO_ATTN_CF_STYLE attn_scale=$PAPO_ATTN_CF_SCALE"
 echo "[run] actor kl_loss_coef=$ACTOR_KL_LOSS_COEF clip_low=$ACTOR_CLIP_RATIO_LOW clip_high=$ACTOR_CLIP_RATIO_HIGH"
+echo "[run] visual_dep_reward use=$USE_VISUAL_DEP_REWARD coef=$VISUAL_DEP_COEF raw_clip=$VISUAL_DEP_RAW_CLIP z_clip=$VISUAL_DEP_Z_CLIP valid_only=$VISUAL_DEP_VALID_ONLY"
 echo "[run] rollout chunked_prefill=$ROLLOUT_ENABLE_CHUNKED_PREFILL limit_images=${ROLLOUT_LIMIT_IMAGES:-unset}"
 echo "[run] log=$LOG_FILE"
 
@@ -202,6 +208,11 @@ fi
   critic.model.fsdp_config.param_offload=False \
   critic.model.fsdp_config.optimizer_offload=False \
   algorithm.kl_ctrl.kl_coef=0.00 \
+  algorithm.use_visual_dep_reward=$USE_VISUAL_DEP_REWARD \
+  algorithm.visual_dep_coef=$VISUAL_DEP_COEF \
+  algorithm.visual_dep_raw_clip=$VISUAL_DEP_RAW_CLIP \
+  algorithm.visual_dep_z_clip=$VISUAL_DEP_Z_CLIP \
+  algorithm.visual_dep_valid_answer_only=$VISUAL_DEP_VALID_ONLY \
   algorithm.adv_estimator=$ADVANTAGE \
   trainer.logger=['console'] \
   trainer.project_name=$WANDB_PROJECT \
