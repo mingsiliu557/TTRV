@@ -4,6 +4,7 @@ import re
 from tqdm import tqdm
 
 from verl.utils.reward_score.ttrl.auto_extract import auto_extract
+from verl.third_party.official_vlmeval.yesno import YOrN_Extraction
 from verl.utils.reward_score.ttrl.direct_answer import (
     aokvqa_direct_answer_score, direct_answer_exact_score,
 )
@@ -60,6 +61,7 @@ def auto_verify(task, all_outputs, all_labels, extra_info=None):
         "bbox": qwen_reward_fn_spatial,
         "vqa_da": None,
         "ocr": None,
+        "yesno": None,
     }
     assert task in task2verify, f"{task} not in {list(task2verify.keys())}"
     verify_fn = task2verify[task]
@@ -73,7 +75,11 @@ def auto_verify(task, all_outputs, all_labels, extra_info=None):
     for idx, (output, label) in enumerate(zip(all_outputs, all_labels)):
         metric = _metric_at(extra_info, idx)
         metrics.append(metric)
-        if metric == "smape":
+        if task == "yesno":
+            reward = float(output in {"yes", "no"} and output == YOrN_Extraction(str(label)).lower())
+            rewards.append(reward)
+            exact_acc.append(reward)
+        elif metric == "smape":
             rewards.append(_capture_smape_score(output, label))
             exact_acc.append(float(verify_fn(output, label)))
         elif task in {"vqa_da", "ocr"}:

@@ -67,16 +67,29 @@ def run_ppo(config) -> None:
     # TODO(linjunrong.ocss884): this ENV is left for resolving SGLang conflict with ray devices
     # isolation, will solve in the future
     os.environ["ENSURE_CUDA_VISIBLE_DEVICES"] = os.environ.get("CUDA_VISIBLE_DEVICES", "")
-    if not ray.is_initialized():
+    started_ray = not ray.is_initialized()
+    if started_ray:
         # this is for local ray cluster
+        runtime = config.get("runtime", {})
+        ray_options = {}
+        if runtime.get("low_host_memory", False):
+            ray_options = dict(num_cpus=runtime.get("ray_num_cpus", 4),
+                               object_store_memory=runtime.get("object_store_memory", 134217728),
+                               include_dashboard=False)
         ray.init(
+            **ray_options,
             runtime_env={
-                "env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN"}
+                "env_vars": {"TOKENIZERS_PARALLELISM": "false" if runtime.get("low_host_memory", False) else "true",
+                             "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN"}
             }
         )
 
-    runner = TaskRunner.remote()
-    ray.get(runner.run.remote(config))
+    try:
+        runner = TaskRunner.remote()
+        ray.get(runner.run.remote(config))
+    finally:
+        if started_ray and config.get("runtime", {}).get("low_host_memory", False):
+            ray.shutdown()
 
     # print(config)
     # exit()
@@ -95,6 +108,11 @@ class TaskRunner:
 
         pprint(OmegaConf.to_container(config, resolve=True))  # resolve=True will eval symbol values
         OmegaConf.resolve(config)
+        if config.get("runtime", {}).get("low_host_memory", False):
+            import json
+            from pathlib import Path
+            output = Path(os.environ["OFFICIAL_RUN_DIR"]) / "resolved_train_config.json"
+            output.write_text(json.dumps(OmegaConf.to_container(config, resolve=True), indent=2))
 
         # download the checkpoint from hdfs
         local_path = copy_to_local(config.actor_rollout_ref.model.path)

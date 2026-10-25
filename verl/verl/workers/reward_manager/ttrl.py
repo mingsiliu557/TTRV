@@ -131,6 +131,8 @@ class TTRLRewardManager:
             return "math"
         elif data_source in ["GPQA-TTT"]:
             return "gpqa"
+        elif data_source == "MME-YN-TTT":
+            return "yesno"
         elif data_source in ["bbox"]:
             return "bbox"
         elif data_source in ["VQA-DA-TTT", "VisualSimpleQA-TTT", "AOKVQA-DA-TTT"]:
@@ -167,6 +169,14 @@ class TTRLRewardManager:
             "correct_present": bool(correct_count > 0),
             "correct_is_minority": bool(correct_count > 0 and correct_count < majority_count),
         }
+
+    def _selection_correct(self, prediction, label, data_source):
+        if data_source == "MME-YN-TTT":
+            from verl.third_party.official_vlmeval.yesno import YOrN_Extraction
+            parsed = YOrN_Extraction(str(prediction))
+            return parsed != "Unknown" and parsed == YOrN_Extraction(str(label))
+        return (_normalize_choice_answer(prediction, choice_labels=self.answer_choice_labels)
+                == _normalize_choice_answer(label, choice_labels=self.answer_choice_labels))
 
     def _write_train_rollouts(self, record):
         self._write_jsonl(os.environ.get("TTRL_TRAIN_ROLLOUT_JSONL"), [record])
@@ -216,10 +226,8 @@ class TTRLRewardManager:
             summary = self._prediction_summary(predictions, group[0].get("ground_truth"))
             reward_summary = self._reward_selection_summary(group)
             pass_at_n = any(bool(record.get("correct")) for record in group)
-            majority_correct = bool(
-                _normalize_choice_answer(summary.get("majority_prediction"), choice_labels=self.answer_choice_labels)
-                == _normalize_choice_answer(group[0].get("ground_truth"), choice_labels=self.answer_choice_labels)
-            )
+            majority_correct = self._selection_correct(summary.get("majority_prediction"),
+                                                       group[0].get("ground_truth"), group[0].get("data_source"))
             invalid_count = sum(1 for prediction in predictions if str(prediction).strip().lower() == "unknown")
             grouped_records.append(
                 {
@@ -867,10 +875,7 @@ class TTRLRewardManager:
                     selection_rewards.append(float(final_reward))
                     prediction = predictions[i]
                     label = group_labels[i]
-                    correct = bool(
-                        _normalize_choice_answer(prediction, choice_labels=self.answer_choice_labels)
-                        == _normalize_choice_answer(label, choice_labels=self.answer_choice_labels)
-                    )
+                    correct = self._selection_correct(prediction, label, group_data_source)
                     true_rewards.append(float(correct))
                     last_index = max(0, group_response_lengths[i] - 1)
                     reward_tensor[row, last_index] = float(final_reward)
@@ -904,10 +909,8 @@ class TTRLRewardManager:
                 selection_idx = int(np.argmax(selection_rewards)) if selection_rewards else -1
                 majority_summary = self._prediction_summary(predictions, group_labels[0] if group_labels else None)
                 reward_selection_correct = bool(true_rewards[selection_idx]) if selection_idx >= 0 else False
-                majority_correct = bool(
-                    _normalize_choice_answer(majority_summary.get("majority_prediction"), choice_labels=self.answer_choice_labels)
-                    == _normalize_choice_answer(group_labels[0], choice_labels=self.answer_choice_labels)
-                ) if group_labels else False
+                majority_correct = self._selection_correct(majority_summary.get("majority_prediction"),
+                                                           group_labels[0], group_data_source) if group_labels else False
                 all_selection_metrics["selection_reward_accuracy"].append(float(reward_selection_correct))
                 all_selection_metrics["selection_majority_accuracy"].append(float(majority_correct))
                 all_selection_metrics[f"selection_pass@{self.eval_n_samples}"].append(float(any(true_rewards)))
@@ -988,6 +991,7 @@ class TTRLRewardManager:
                         "prompt": prompt_str,
                         "response_raw": response_str,
                         "response_token_len": int(valid_response_length),
+                        "decoded_text": self.tokenizer.decode(valid_response_idx, skip_special_tokens=True),
                         "extra_info": extra_info,
                     }
                 )
@@ -1013,7 +1017,7 @@ class TTRLRewardManager:
                 answer_parse_mode=self.answer_parse_mode,
                 choice_labels=self.answer_choice_labels,
             )
-            choice_eval = task not in {"vqa_da", "ocr"} and bool(group_labels) and _has_choice_ground_truth(
+            choice_eval = task not in {"vqa_da", "ocr", "yesno"} and bool(group_labels) and _has_choice_ground_truth(
                 group_labels[0],
                 choice_labels=self.answer_choice_labels,
             )

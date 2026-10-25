@@ -42,11 +42,13 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         model_config,
         full_params: bool = False,
         device_mesh: DeviceMesh = None,
+        enable_sleep_mode: bool = True,
     ):
         self.module = module
         self.inference_engine = inference_engine
         self.model_config = model_config
         self.device_mesh = device_mesh
+        self.enable_sleep_mode = enable_sleep_mode
 
         # Full params
         self.full_params = full_params
@@ -96,9 +98,9 @@ class FSDPVLLMShardingManager(BaseShardingManager):
             log_gpu_memory_usage("After sync model weights in sharding manager", logger=logger)
             del params
         else:
-            if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
+            if self.enable_sleep_mode and "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
                 self.inference_engine.wake_up(tags=["weights"])
-            else:
+            elif self.enable_sleep_mode:
                 self.inference_engine.wake_up()
 
             # update model params
@@ -107,7 +109,7 @@ class FSDPVLLMShardingManager(BaseShardingManager):
             del params
             torch.cuda.empty_cache()
 
-            if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
+            if self.enable_sleep_mode and "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
                 self.inference_engine.wake_up(tags=["kv_cache"])
 
         log_gpu_memory_usage("After del state_dict and empty_cache in sharding manager", logger=logger)
@@ -126,7 +128,9 @@ class FSDPVLLMShardingManager(BaseShardingManager):
     def __exit__(self, exc_type, exc_value, traceback):
         log_gpu_memory_usage("Before vllm offload in sharding manager", logger=logger)
         # TODO(ZSL): check this
-        if vllm_version in ("0.4.2", "0.5.4", "0.6.3"):
+        if not self.enable_sleep_mode:
+            pass  # GPU-resident inference weights; next entry still synchronizes actor weights.
+        elif vllm_version in ("0.4.2", "0.5.4", "0.6.3"):
             self.inference_engine.offload_model_weights()
         else:
             self.inference_engine.sleep(level=1)

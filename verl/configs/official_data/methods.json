@@ -1,0 +1,27 @@
+{
+  "common": {
+    "NO_GPU": "2", "DATA_TRAIN_BATCH_SIZE": "2", "MINI_BATCH_SIZE": "1",
+    "MICRO_BATCH_SIZE": "1", "N_VOTES_PER_PROMPT": "32", "N_SAMPLES_PER_PROMPT": "16",
+    "N": "1", "MAX_PROMPT_LENGTH": "7524", "MAX_RESPONSE_LENGTH": "1024",
+    "ANSWER_PARSE_MODE": "legacy", "ANSWER_CHOICE_LABELS": "A-D",
+    "PAPO_KL_PRCP_COEF": "0.0", "PAPO_ORI_ENTROPY_COEF": "0.0",
+    "VISUAL_DEP_RAW_CLIP": "20.0", "VISUAL_DEP_Z_CLIP": "3.0",
+    "VISUAL_DEP_VALID_ONLY": "true", "PAPO_CF_MODE": "attention",
+    "DENSITY_TEMPERATURE_T0": "0.20", "DENSITY_TEMPERATURE_T_MIN": "0.10", "DENSITY_TEMPERATURE_T_MAX": "0.30"
+  },
+  "AI2D_TEST": {
+    "DENSITY_EMBEDDING_SCOPE": "evidence_query_mean_pool",
+    "VISUAL_DEP_COEF": "0.03", "PAPO_ATTN_CF_RATIO": "0.40", "PAPO_ATTN_CF_STYLE": "soft_scale",
+    "PAPO_ATTN_CF_SCALE": "0.30", "PAPO_MASK_PROB": "0.60",
+    "ACTOR_KL_LOSS_COEF": "0.001", "ACTOR_CLIP_RATIO_LOW": "0.2", "ACTOR_CLIP_RATIO_HIGH": "0.2"
+  },
+  "MME": {
+    "DENSITY_EMBEDDING_SCOPE": "canonical_evidence_query_mean_pool",
+    "VISUAL_DEP_COEF": "0.02", "PAPO_ATTN_CF_RATIO": "0.60", "PAPO_ATTN_CF_STYLE": "hard_cut",
+    "PAPO_ATTN_CF_SCALE": "0.30", "PAPO_MASK_PROB": "0.45",
+    "ACTOR_KL_LOSS_COEF": "0.01", "ACTOR_CLIP_RATIO_LOW": "0.2", "ACTOR_CLIP_RATIO_HIGH": "0.3"
+  },
+  "ttrv": {"TTRL_REWARD_STYLE": "frequency_entropy", "ENTROPY_COEF": "0.75", "USE_PAPO_PRCP_LOSS": "false", "USE_VISUAL_DEP_REWARD": "false"},
+  "prove": {"TTRL_REWARD_STYLE": "density_cluster_answer_entropy", "ENTROPY_COEF": "0.0", "USE_PAPO_PRCP_LOSS": "true", "USE_VISUAL_DEP_REWARD": "true"},
+  "base": {"TTRL_REWARD_STYLE": "frequency_entropy", "ENTROPY_COEF": "0.75", "USE_PAPO_PRCP_LOSS": "false", "USE_VISUAL_DEP_REWARD": "false"}
+}

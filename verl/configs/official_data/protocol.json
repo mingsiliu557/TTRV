@@ -1,0 +1,22 @@
+{
+  "upstream_commit": "4d0dc8096b2ee365491c469088cc462ae1fb6041",
+  "datasets": ["AI2D_TEST", "MME"],
+  "use_cot": false,
+  "use_mpo": false,
+  "judge": "exact_matching",
+  "external_judge": false,
+  "adaptation_count": 20,
+  "adaptation_unit": "question",
+  "adaptation_source": "evaluation_pool",
+  "subset_seed": 42,
+  "rl_seed": 42,
+  "rollouts": 32,
+  "update_samples": 16,
+  "train_steps": 20,
+  "checkpoint_selection": "final_step",
+  "base_validation_samples": 1,
+  "training_gpus": 2,
+  "host_memory_limit_bytes": 4294967296,
+  "host_memory_reserve_bytes": 536870912,
+  "boundary": "official data/task prompt/scoring; not full official model inference protocol"
+}

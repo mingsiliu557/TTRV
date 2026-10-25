@@ -52,7 +52,7 @@ def _choice_char_class(choice_labels):
 
 
 def _is_choice_group(task, ground_truth, choice_labels=None):
-    if task in {"vqa_da", "ocr"}:
+    if task in {"vqa_da", "ocr", "yesno"}:
         return False
     if task == "gpqa":
         return True

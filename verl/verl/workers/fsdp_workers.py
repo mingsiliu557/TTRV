@@ -84,6 +84,10 @@ class ActorRolloutRefWorker(Worker):
     def __init__(self, config: DictConfig, role: str):
         super().__init__()
         self.config = config
+        if config.get("seed") is not None:
+            # Opt-in experiment seed; legacy launchers retain their previous behavior.
+            from transformers import set_seed
+            set_seed(int(config.seed))
         import torch.distributed
 
         if not torch.distributed.is_initialized():
@@ -300,7 +304,7 @@ class ActorRolloutRefWorker(Worker):
         # TODO: add transformer policy
         # We force reference policy to use CPUOffload to save memory.
         # We force turn off CPUOffload for actor because it causes incorrect results when using grad accumulation
-        cpu_offload = None if role == "actor" else CPUOffload(offload_params=True)
+        cpu_offload = None if role == "actor" or self.config.model.get("keep_reference_on_gpu", False) else CPUOffload(offload_params=True)
         actor_module_fsdp = FSDP(
             actor_module,
             cpu_offload=cpu_offload,
@@ -407,6 +411,7 @@ class ActorRolloutRefWorker(Worker):
                 model_config=self.actor_model_config,
                 full_params="hf" in self.config.rollout.load_format,
                 device_mesh=rollout_device_mesh,
+                enable_sleep_mode=self.config.rollout.get("enable_sleep_mode", True),
             )
             log_gpu_memory_usage("After building sharding manager", logger=None)
 

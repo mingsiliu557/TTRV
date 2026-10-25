@@ -122,7 +122,8 @@ class vLLMRollout(BaseRollout):
 
         self.inference_engine = LLM(
             model=model_path,
-            enable_sleep_mode=True,
+            enable_sleep_mode=config.get("enable_sleep_mode", True),
+            swap_space=config.get("swap_space", 4),
             tensor_parallel_size=tensor_parallel_size,
             distributed_executor_backend="external_launcher",
             dtype=config.dtype,
@@ -144,7 +145,8 @@ class vLLMRollout(BaseRollout):
         )
 
         # Offload vllm model to reduce peak memory usage
-        self.inference_engine.sleep(level=1)
+        if config.get("enable_sleep_mode", True):
+            self.inference_engine.sleep(level=1)
 
         kwargs = dict(
             n=1,

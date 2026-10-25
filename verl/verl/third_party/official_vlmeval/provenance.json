@@ -1,0 +1,25 @@
+{
+  "commit": "4d0dc8096b2ee365491c469088cc462ae1fb6041",
+  "source": "https://github.com/open-compass/VLMEvalKit",
+  "files": {
+    "misc.py": {
+      "sha256": "407ec5eaaf84227368365c6c7c93725166becfe755ed6a24eb93260d65464258"
+    },
+    "yorn.py": {
+      "sha256": "692d72ee0c8fe64c7dd93b466f1b47c432303d8fba57503c56aae770b67ef59e"
+    },
+    "matching_util.py": {
+      "sha256": "e88638369165759cc40c3f6dad025b58b2d2cf1b6d2f28f80118755f1578a889"
+    },
+    "vlm.py": {
+      "sha256": "574e94b2c7088557932a136ed5c3e8e1be560a4729c5375556a3d828cf6c0e83"
+    },
+    "multiple_choice.py": {
+      "sha256": "39188c274e60899ceeff9f4180cbf0f9c798dd8954da0f9dccc85da0951d54c6"
+    },
+    "internvl_utils.py": {
+      "sha256": "095e017343427c79c86e35c208632df788de8ddee4fafa4889aec3093c5b577b"
+    }
+  },
+  "changes": "Only pure definitions extracted unchanged. Imports isolated; load reads scorer JSONL. No model imports, network or judge calls. Offline adapter calls eval_vanilla with model=None and report_acc / MME_rating."
+}

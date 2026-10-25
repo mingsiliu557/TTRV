@@ -325,7 +325,12 @@ def _extract_choice_label_from_response(response_text: str, valid_labels):
     return None
 
 
-def _canonicalize_density_evidence_text(prompt_text: str, response_text: str, template: str):
+def _canonicalize_density_evidence_text(prompt_text: str, response_text: str, template: str, answer_type="choice"):
+    if answer_type == "yesno":
+        from verl.third_party.official_vlmeval.yesno import YOrN_Extraction
+        answer = YOrN_Extraction(response_text).lower()
+        return template.format(response=response_text, answer=answer, candidate=answer,
+                               option_label="unknown", option_text=answer if answer != "unknown" else "")
     options = _extract_choice_options_from_prompt(prompt_text)
     label = _extract_choice_label_from_response(response_text, set(options) or set("ABCDEF"))
     option = options.get(label) if label else None
@@ -381,7 +386,9 @@ def _build_density_evidence_query_batch(
         decoded_response = _decode_response_for_evidence(tokenizer, responses[row_idx], response_mask[row_idx])
         if canonicalize:
             decoded_prompt = _decode_prompt_for_evidence(tokenizer, prompts[row_idx], prompt_attention_mask[row_idx])
-            evidence_text = _canonicalize_density_evidence_text(decoded_prompt, decoded_response, template)
+            sources = batch.non_tensor_batch.get("data_source")
+            answer_type = "yesno" if sources is not None and sources[row_idx] == "MME-YN-TTT" else "choice"
+            evidence_text = _canonicalize_density_evidence_text(decoded_prompt, decoded_response, template, answer_type)
         else:
             evidence_text = template.format(
                 response=decoded_response,
@@ -1318,7 +1325,7 @@ class RayPPOTrainer:
         self.train_dataloader = StatefulDataLoader(
             dataset=self.train_dataset,
             batch_size=self.config.data.get("gen_batch_size", self.config.data.train_batch_size),
-            num_workers=8,
+            num_workers=self.config.data.get("dataloader_num_workers", 8),
             drop_last=True,
             collate_fn=collate_fn,
             sampler=sampler,
@@ -1335,8 +1342,8 @@ class RayPPOTrainer:
             dataset=self.val_dataset,
             # Validation datasets are sent to inference engines as a whole batch,
             # which will schedule the memory themselves.
-            batch_size=20, # double check this ==> reduce it to 400
-            num_workers=8,
+            batch_size=self.config.data.get("validation_batch_size", 20),
+            num_workers=self.config.data.get("dataloader_num_workers", 8),
             shuffle=False,
             drop_last=False,
             collate_fn=collate_fn,
