@@ -347,6 +347,8 @@ class TTRLRewardManager:
             all_ttrl_metrics = defaultdict(list)
 
             scores = [0.0 for _ in range(len(data))]
+            diagnostic_verifier_scores = [0.0 for _ in range(len(data))]
+            diagnostic_answer_valid = [False for _ in range(len(data))]
             
             for prompt_i in range(prompt_num):
                 group_pred_outputs = []
@@ -358,6 +360,7 @@ class TTRLRewardManager:
                 group_transform_metadata = []
                 group_response_embeddings = []
                 group_density_evidence_queries = []
+                group_self_certainties = []
                 task = None
                 group_prompt_str = None
                 group_data_source = None
@@ -412,7 +415,18 @@ class TTRLRewardManager:
                     group_labels.append(ground_truth)
                     group_pred_outputs.append(response_str)
                     group_extra_info.append(extra_info)
-                    group_response_lengths.append(int(valid_response_length))
+                    response_length_int = int(valid_response_length)
+                    group_response_lengths.append(response_length_int)
+                    if "self_certainties" in data_item.batch:
+                        token_self_certainty = data_item.batch["self_certainties"][:response_length_int]
+                        if response_length_int > 0:
+                            group_self_certainties.append(
+                                float(token_self_certainty.detach().float().mean().cpu().item())
+                            )
+                        else:
+                            group_self_certainties.append(0.0)
+                    else:
+                        group_self_certainties.append(None)
                 metric_result = test_time_train_metrics(
                     group_pred_outputs,
                     group_labels,
@@ -501,6 +515,47 @@ class TTRLRewardManager:
                     density_details = {}
                     predictions = auto_extract(task, group_pred_outputs, extra_info=group_extra_info)
                     transform_predictions = []
+
+                choice_diagnostics = (
+                    task not in {"vqa_da", "ocr"}
+                    and bool(group_labels)
+                    and _has_choice_ground_truth(
+                        group_labels[0],
+                        choice_labels=self.answer_choice_labels,
+                    )
+                )
+                if choice_diagnostics:
+                    verifier_scores = [
+                        float(
+                            _normalize_choice_answer(
+                                prediction,
+                                choice_labels=self.answer_choice_labels,
+                            )
+                            == _normalize_choice_answer(
+                                label,
+                                choice_labels=self.answer_choice_labels,
+                            )
+                        )
+                        for prediction, label in zip(predictions, group_labels)
+                    ]
+                else:
+                    verifier_scores, _ = auto_verify(
+                        task,
+                        group_pred_outputs,
+                        group_labels,
+                        extra_info=group_extra_info,
+                    )
+                    verifier_scores = [float(score) for score in verifier_scores]
+                parser_validity = [
+                    bool(str(prediction or "").strip())
+                    and str(prediction).strip().lower() != "unknown"
+                    for prediction in predictions
+                ]
+                for i in range(self.n_votes_per_prompt):
+                    row = prompt_i * self.n_votes_per_prompt + i
+                    diagnostic_verifier_scores[row] = verifier_scores[i]
+                    diagnostic_answer_valid[row] = parser_validity[i]
+
                 prompt_update_indices = list(range(self.n_samples_per_prompt))
                 prompt_update_index_set = set(prompt_update_indices)
 
@@ -514,6 +569,7 @@ class TTRLRewardManager:
                     "prompt": group_prompt_str,
                     "extra_info": group_extra_info[0] if group_extra_info else None,
                     "reward_style": self.reward_style,
+                    "reward_signal": os.environ.get("REWARD_SIGNAL", "ttrv"),
                     "entropy_coef": self.entropy_coef,
                     "answer_parse_mode": self.answer_parse_mode,
                     "feature_center_hsr_alpha": self.feature_center_hsr_alpha,
@@ -530,6 +586,12 @@ class TTRLRewardManager:
                     "numeric_kernel_sigma": self.numeric_kernel_sigma,
                     "numeric_trim_ratio": self.numeric_trim_ratio,
                     "answer_choice_labels": self.answer_choice_labels,
+                    "self_certainty_mean": float(np.mean([
+                        value for value in group_self_certainties if value is not None
+                    ])) if any(value is not None for value in group_self_certainties) else None,
+                    "self_certainty_std": float(np.std([
+                        value for value in group_self_certainties if value is not None
+                    ])) if any(value is not None for value in group_self_certainties) else None,
                     **summary,
                     "samples": [
                         {
@@ -538,6 +600,14 @@ class TTRLRewardManager:
                             "response_raw": group_pred_outputs[i],
                             "prediction": predictions[i],
                             "reward": float(rewards[i]),
+                            "optimization_reward": (
+                                group_self_certainties[i]
+                                if os.environ.get("REWARD_SIGNAL", "ttrv").strip().lower() == "intuitor"
+                                else float(rewards[i])
+                            ),
+                            "self_certainty": group_self_certainties[i],
+                            "parser_valid": bool(parser_validity[i]),
+                            "verifier_score": float(verifier_scores[i]),
                             "response_token_len": group_response_lengths[i],
                             **({
                                 "p_reward": choice_details.get("p_rewards", [None] * self.n_votes_per_prompt)[i],
@@ -733,7 +803,18 @@ class TTRLRewardManager:
                         print("[response]", response_str)
                         print("[score]", rewards[i])
 
-            data.batch["acc"] = torch.tensor(scores, dtype=torch.float32, device=data.batch["prompts"].device)
+            tensor_device = data.batch["prompts"].device
+            data.batch["acc"] = torch.tensor(scores, dtype=torch.float32, device=tensor_device)
+            data.batch["answer_correct"] = torch.tensor(
+                diagnostic_verifier_scores,
+                dtype=torch.float32,
+                device=tensor_device,
+            )
+            data.batch["answer_valid"] = torch.tensor(
+                diagnostic_answer_valid,
+                dtype=torch.bool,
+                device=tensor_device,
+            )
             
             for k, v in all_ttrl_metrics.items():
                 if isinstance(v, list):

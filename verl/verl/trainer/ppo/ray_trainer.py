@@ -17,6 +17,7 @@ This trainer supports model-agonistic model initialization with huggingface
 """
 
 import json
+import math
 import os
 import hashlib
 import random
@@ -760,6 +761,148 @@ def _pearson_corr(x: torch.Tensor, y: torch.Tensor, valid_mask: torch.Tensor, ep
     return float(corr.item())
 
 
+def _reward_signal_name(config) -> str:
+    return str(config.algorithm.get("reward_signal", "ttrv")).strip().lower()
+
+
+def apply_intuitor_self_certainty_reward(
+    data: DataProto,
+    vocab_size: int | None = None,
+):
+    """Replace rule-based scores with detached Intuitor sequence self-certainty."""
+    required_keys = ["self_certainties", "response_mask", "token_level_scores"]
+    missing_keys = [key for key in required_keys if key not in data.batch.keys()]
+    if missing_keys:
+        raise ValueError(
+            "Intuitor reward requires "
+            f"{missing_keys}; request calculate_self_certainty during old-log-prob recomputation."
+        )
+
+    self_certainty_tokens = data.batch["self_certainties"]
+    response_mask = data.batch["response_mask"].to(device=self_certainty_tokens.device)
+    token_level_scores = data.batch["token_level_scores"]
+    if self_certainty_tokens.shape != response_mask.shape:
+        raise ValueError(
+            f"self_certainties shape {tuple(self_certainty_tokens.shape)} does not match "
+            f"response_mask shape {tuple(response_mask.shape)}"
+        )
+    if token_level_scores.shape != response_mask.shape:
+        raise ValueError(
+            f"token_level_scores shape {tuple(token_level_scores.shape)} does not match "
+            f"response_mask shape {tuple(response_mask.shape)}"
+        )
+    if self_certainty_tokens.requires_grad:
+        raise ValueError("Intuitor self-certainty must be detached before reward construction")
+
+    mask = response_mask.to(dtype=self_certainty_tokens.dtype)
+    response_lengths = mask.sum(dim=-1)
+    valid_response = response_lengths > 0
+    finite_valid_tokens = torch.isfinite(self_certainty_tokens) | ~response_mask.bool()
+    if not bool(finite_valid_tokens.all().item()):
+        raise ValueError("Intuitor self-certainty contains non-finite values on response tokens")
+
+    masked_self_certainty = self_certainty_tokens.detach() * mask
+    sequence_self_certainty = masked_self_certainty.sum(dim=-1) / response_lengths.clamp_min(1.0)
+    sequence_self_certainty = torch.where(
+        valid_response,
+        sequence_self_certainty,
+        torch.zeros_like(sequence_self_certainty),
+    )
+    if bool((sequence_self_certainty[valid_response] < -1e-5).any().item()):
+        raise ValueError("KL(Uniform || policy) self-certainty must be non-negative")
+    sequence_self_certainty = sequence_self_certainty.clamp_min(0.0)
+
+    replacement_scores = torch.zeros_like(token_level_scores)
+    last_index, valid_last_token = _last_response_token_index(response_mask)
+    valid_rows = torch.nonzero(valid_last_token, as_tuple=False).flatten()
+    if valid_rows.numel() > 0:
+        replacement_scores[
+            valid_rows.to(device=replacement_scores.device),
+            last_index[valid_rows].to(device=replacement_scores.device),
+        ] = sequence_self_certainty[valid_rows].to(
+            device=replacement_scores.device,
+            dtype=replacement_scores.dtype,
+        )
+
+    data.batch["token_level_scores"] = replacement_scores
+    data.batch["intuitor_self_certainty_seq"] = sequence_self_certainty.detach()
+
+    uid_groups = defaultdict(list)
+    uid_values = data.non_tensor_batch.get("uid", np.arange(len(data)))
+    valid_cpu = valid_response.detach().cpu().tolist()
+    for row, uid in enumerate(list(uid_values)):
+        if row < len(valid_cpu) and valid_cpu[row]:
+            uid_groups[str(uid)].append(row)
+
+    group_stds = []
+    active_groups = 0
+    for indices in uid_groups.values():
+        index_tensor = torch.tensor(indices, device=sequence_self_certainty.device, dtype=torch.long)
+        group_values = sequence_self_certainty.index_select(0, index_tensor)
+        group_std = group_values.std(unbiased=False) if len(indices) > 1 else group_values.new_zeros(())
+        group_stds.append(group_std)
+        if float(group_std.item()) > 1e-6:
+            active_groups += 1
+    group_std_tensor = (
+        torch.stack(group_stds)
+        if group_stds
+        else sequence_self_certainty.new_empty((0,))
+    )
+
+    valid_tokens = self_certainty_tokens[response_mask.bool()]
+    valid_sequences = sequence_self_certainty[valid_response]
+    answer_valid = data.batch.get("answer_valid")
+    if answer_valid is None:
+        answer_valid = valid_response
+    else:
+        answer_valid = answer_valid.to(device=sequence_self_certainty.device).bool() & valid_response
+    verifier_score = data.batch.get("answer_correct")
+    if verifier_score is None:
+        verifier_score = torch.zeros_like(sequence_self_certainty)
+    else:
+        verifier_score = verifier_score.to(
+            device=sequence_self_certainty.device,
+            dtype=sequence_self_certainty.dtype,
+        )
+
+    correct_mask = valid_response & (verifier_score >= 0.5)
+    incorrect_mask = valid_response & (verifier_score < 0.5)
+    invalid_mask = valid_response & ~answer_valid
+    repo_shift = math.log(int(vocab_size)) if vocab_size else 0.0
+    metrics = {
+        "train/intuitor_sc_token_mean": _safe_tensor_mean(valid_tokens),
+        "train/intuitor_sc_token_std": _safe_tensor_std(valid_tokens),
+        "train/intuitor_sc_token_min": _safe_tensor_min(valid_tokens),
+        "train/intuitor_sc_token_max": _safe_tensor_max(valid_tokens),
+        "train/intuitor_sc_sequence_mean": _safe_tensor_mean(valid_sequences),
+        "train/intuitor_sc_sequence_std": _safe_tensor_std(valid_sequences),
+        "train/intuitor_sc_sequence_min": _safe_tensor_min(valid_sequences),
+        "train/intuitor_sc_sequence_max": _safe_tensor_max(valid_sequences),
+        "train/intuitor_sc_repo_shifted_mean": _safe_tensor_mean(valid_sequences) + repo_shift,
+        "train/intuitor_sc_group_std_mean": _safe_tensor_mean(group_std_tensor),
+        "train/intuitor_sc_group_std_min": _safe_tensor_min(group_std_tensor),
+        "train/intuitor_sc_group_std_max": _safe_tensor_max(group_std_tensor),
+        "train/intuitor_sc_group_count": float(len(uid_groups)),
+        "train/intuitor_sc_active_group_ratio": float(active_groups / len(uid_groups)) if uid_groups else 0.0,
+        "train/intuitor_sc_correctness_corr": _pearson_corr(
+            sequence_self_certainty, verifier_score, valid_response
+        ),
+        "train/intuitor_sc_parser_valid_corr": _pearson_corr(
+            sequence_self_certainty, answer_valid.float(), valid_response
+        ),
+        "train/intuitor_sc_correct_mean": _safe_tensor_mean(sequence_self_certainty[correct_mask]),
+        "train/intuitor_sc_incorrect_mean": _safe_tensor_mean(sequence_self_certainty[incorrect_mask]),
+        "train/intuitor_sc_invalid_mean": _safe_tensor_mean(sequence_self_certainty[invalid_mask]),
+        "train/intuitor_parser_valid_ratio": float(answer_valid.float().mean().item()),
+        "train/intuitor_verifier_score_mean": _safe_tensor_mean(verifier_score[valid_response]),
+        "train/intuitor_response_length_mean": _safe_tensor_mean(response_lengths[valid_response]),
+        "train/intuitor_response_length_min": _safe_tensor_min(response_lengths[valid_response]),
+        "train/intuitor_response_length_max": _safe_tensor_max(response_lengths[valid_response]),
+        "train/intuitor_reward_detached": float(not sequence_self_certainty.requires_grad),
+    }
+    return data, metrics
+
+
 def apply_visual_dependency_reward(
     data: DataProto,
     coef: float = 0.2,
@@ -1248,6 +1391,29 @@ class RayPPOTrainer:
         if config.algorithm.use_kl_in_reward and config.actor_rollout_ref.actor.use_kl_loss:
             print("NOTICE: You have both enabled in-reward kl and kl loss.")
 
+        reward_signal = _reward_signal_name(config)
+        if reward_signal not in {"ttrv", "intuitor"}:
+            raise ValueError(f"Unsupported algorithm.reward_signal={reward_signal!r}")
+        if reward_signal == "intuitor":
+            if not self.use_ttrl:
+                raise ValueError("Intuitor baseline requires reward_model.reward_manager=ttrl for diagnostics")
+            incompatible = []
+            if bool(config.algorithm.use_kl_in_reward):
+                incompatible.append("algorithm.use_kl_in_reward")
+            if bool(config.algorithm.get("use_visual_dep_reward", False)):
+                incompatible.append("algorithm.use_visual_dep_reward")
+            if bool(config.actor_rollout_ref.actor.get("use_papo_prcp_loss", False)):
+                incompatible.append("actor_rollout_ref.actor.use_papo_prcp_loss")
+            if incompatible:
+                raise ValueError(
+                    "Intuitor must use self-certainty as the only reward; disable "
+                    + ", ".join(incompatible)
+                )
+            print(
+                "[validate_config] Intuitor reward enabled: parser/frequency outputs are diagnostics only; "
+                "invalid responses are not filtered from self-certainty reward."
+            )
+
         # critic
         if self.use_critic and not config.critic.use_dynamic_bsz:
             assert config.data.train_batch_size >= config.critic.ppo_mini_batch_size
@@ -1318,7 +1484,7 @@ class RayPPOTrainer:
         self.train_dataloader = StatefulDataLoader(
             dataset=self.train_dataset,
             batch_size=self.config.data.get("gen_batch_size", self.config.data.train_batch_size),
-            num_workers=8,
+            num_workers=int(os.environ.get("TTRV_DATALOADER_WORKERS", "8")),
             drop_last=True,
             collate_fn=collate_fn,
             sampler=sampler,
@@ -1336,7 +1502,7 @@ class RayPPOTrainer:
             # Validation datasets are sent to inference engines as a whole batch,
             # which will schedule the memory themselves.
             batch_size=20, # double check this ==> reduce it to 400
-            num_workers=8,
+            num_workers=int(os.environ.get("TTRV_DATALOADER_WORKERS", "8")),
             shuffle=False,
             drop_last=False,
             collate_fn=collate_fn,
@@ -1904,6 +2070,10 @@ class RayPPOTrainer:
             config=OmegaConf.to_container(self.config, resolve=True),
         )
 
+        reward_signal = _reward_signal_name(self.config)
+        use_intuitor_reward = reward_signal == "intuitor"
+        print(f"[trainer] reward_signal={reward_signal}")
+
         self.global_steps = 0
 
         # load checkpoint before doing anything
@@ -2052,6 +2222,7 @@ class RayPPOTrainer:
                             )
                         )
                         batch.meta_info["return_response_embeddings"] = use_response_embeddings
+                        batch.meta_info["calculate_self_certainty"] = use_intuitor_reward
                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
                         entropys = old_log_prob.batch["entropys"]
                         response_masks = batch.batch["response_mask"]
@@ -2173,6 +2344,15 @@ class RayPPOTrainer:
                             reward_extra_infos_dict = {}
 
                         batch.batch["token_level_scores"] = reward_tensor
+                        if use_intuitor_reward:
+                            tokenizer_vocab_size = getattr(self.tokenizer, "vocab_size", None)
+                            if tokenizer_vocab_size is None:
+                                tokenizer_vocab_size = len(self.tokenizer)
+                            batch, intuitor_metrics = apply_intuitor_self_certainty_reward(
+                                batch,
+                                vocab_size=int(tokenizer_vocab_size),
+                            )
+                            metrics.update(intuitor_metrics)
 
                         if (
                             self.config.actor_rollout_ref.actor.get("use_papo_prcp_loss", False)

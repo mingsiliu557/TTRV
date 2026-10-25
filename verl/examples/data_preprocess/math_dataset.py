@@ -36,14 +36,14 @@ def extract_solution(solution_str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--local_dir", default="/home/test/test05/cgq/data/MATH-TTRL")
+    parser.add_argument("--local_dir", default="/workspace/user/test05/cgq/data/MATH-TTRL")
     parser.add_argument("--hdfs_dir", default=None)
 
     args = parser.parse_args()
 
     # 'lighteval/MATH' is no longer available on huggingface.
     # Use mirror repo: DigitalLearningGmbH/MATH-lighteval
-    data_source = "/home/test/test05/whb/data/test_data_o1/math/MATH500.jsonl"
+    data_source = "/workspace/user/test05/whb/data/test_data_o1/math/MATH500.jsonl"
     print(f"Loading the {data_source} dataset from huggingface...", flush=True)
     # dataset_dict = read_jsonl_file(data_source)
     

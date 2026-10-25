@@ -129,8 +129,8 @@ def _write_split(rows: list[dict], output_dir: Path, split: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build temporary MME20 prompt variants for evidence-reasoning pilot.")
-    parser.add_argument("--source-dir", default="/jiigan-hp/ttrv-datasets/verl_data/mme_20")
-    parser.add_argument("--output-root", default="/jiigan-hp/ttrv-datasets/verl_data/mme_20_reasoning_pilot")
+    parser.add_argument("--source-dir", default="/data/ttrv/verl_data/mme_20")
+    parser.add_argument("--output-root", default="/data/ttrv/verl_data/mme_20_reasoning_pilot")
     parser.add_argument("--test-limit", type=int, default=-1)
     parser.add_argument("--train-limit", type=int, default=2)
     parser.add_argument("--variants", nargs="+", default=list(VARIANTS), choices=VARIANTS)

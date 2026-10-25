@@ -15,6 +15,7 @@
 Contain small torch utilities
 """
 
+import math
 from typing import Dict, List, Optional, Union
 
 import torch
@@ -110,6 +111,38 @@ def entropy_from_logits(logits: torch.Tensor):
     pd = torch.nn.functional.softmax(logits, dim=-1)
     entropy = torch.logsumexp(logits, dim=-1) - torch.sum(pd * logits, dim=-1)
     return entropy
+
+
+def self_certainty_from_logits(logits: torch.Tensor) -> torch.Tensor:
+    """Compute Intuitor self-certainty ``KL(Uniform || softmax(logits))`` per token."""
+    vocab_size = logits.shape[-1]
+    logits_fp32 = logits.float()
+    self_certainty = (
+        torch.logsumexp(logits_fp32, dim=-1)
+        - logits_fp32.mean(dim=-1)
+        - math.log(vocab_size)
+    )
+    return self_certainty.clamp_min(0.0)
+
+
+def self_certainty_from_logits_with_chunking(
+    logits: torch.Tensor, chunk_size: int = 256
+) -> torch.Tensor:
+    """Memory-bounded self-certainty for logits with arbitrary leading dimensions."""
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+
+    vocab_size = logits.shape[-1]
+    flat_logits = logits.reshape(-1, vocab_size)
+    output = torch.empty(flat_logits.shape[0], dtype=torch.float32, device=logits.device)
+    log_vocab_size = math.log(vocab_size)
+    for start in range(0, flat_logits.shape[0], chunk_size):
+        stop = min(start + chunk_size, flat_logits.shape[0])
+        chunk = flat_logits[start:stop].float()
+        output[start:stop] = (
+            torch.logsumexp(chunk, dim=-1) - chunk.mean(dim=-1) - log_vocab_size
+        ).clamp_min(0.0)
+    return output.reshape(logits.shape[:-1])
 
 
 def masked_sum(values, mask, axis=None):

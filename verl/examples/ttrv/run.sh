@@ -4,7 +4,7 @@ set -Eeuo pipefail
 # ray stop
 unset VLLM_ATTENTION_BACKEND
 export VLLM_USE_V1="${VLLM_USE_V1:-1}"
-export HF_HOME="${HF_HOME:-/root/autodl-tmp/.cache/huggingface}"
+export HF_HOME="${HF_HOME:-/workspace/.cache/huggingface}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 
@@ -45,6 +45,9 @@ BACKBONE_SAFE=$(echo "$BACKBONE_PATH" | tr '/' '_')
 MODEL="${TASK}-${BACKBONE_SAFE}"
 EXPERIMENT="TTRL-Len@${K}k"
 TTRL_REWARD_STYLE="${TTRL_REWARD_STYLE:-frequency_entropy}"
+export REWARD_SIGNAL="${REWARD_SIGNAL:-ttrv}"
+SELF_CERTAINTY_USE_RAW_LOGITS="${SELF_CERTAINTY_USE_RAW_LOGITS:-true}"
+SELF_CERTAINTY_CHUNK_SIZE="${SELF_CERTAINTY_CHUNK_SIZE:-256}"
 SOFT_LABEL_GAMMA="${SOFT_LABEL_GAMMA:-2.0}"
 UNKNOWN_REWARD="${UNKNOWN_REWARD:-0.0}"
 ALL_UNKNOWN_REWARD="${ALL_UNKNOWN_REWARD:-0.0}"
@@ -99,6 +102,7 @@ mkdir -p "$LOG_DIR"
 LOG_FILE="${LOG_FILE:-$LOG_DIR/${TASK}_${BACKBONE_SAFE}_${EPISODE}e_${DATE}_${TIME_TAG}.log}" # log file name
 
 echo "[run] task=$TASK backbone=$BACKBONE_PATH gpus=$NO_GPU epochs=$EPISODE"
+echo "[run] reward_signal=$REWARD_SIGNAL self_certainty_raw_logits=$SELF_CERTAINTY_USE_RAW_LOGITS self_certainty_chunk_size=$SELF_CERTAINTY_CHUNK_SIZE"
 echo "[run] data=$DATA_LOCAL_DIR reward_style=$TTRL_REWARD_STYLE gamma=$SOFT_LABEL_GAMMA parser=$ANSWER_PARSE_MODE labels=$ANSWER_CHOICE_LABELS harmony_transform=$HARMONY_TRANSFORM_TYPE fc_hsr_alpha=$FEATURE_CENTER_HSR_ALPHA fc_hsr_beta=$FEATURE_CENTER_HSR_BETA"
 echo "[run] entropy_temperature version=$ENTROPY_TEMPERATURE_VERSION tau0=$ENTROPY_TEMPERATURE_TAU0 gamma=$ENTROPY_TEMPERATURE_GAMMA lambda=$ENTROPY_TEMPERATURE_LAMBDA tau_min=$ENTROPY_TEMPERATURE_TAU_MIN"
 echo "[run] density_temperature t0=$DENSITY_TEMPERATURE_T0 t_min=$DENSITY_TEMPERATURE_T_MIN t_max=$DENSITY_TEMPERATURE_T_MAX embedding_scope=$DENSITY_EMBEDDING_SCOPE log_embeddings=${TTRL_LOG_RESPONSE_EMBEDDINGS:-0}"
@@ -169,6 +173,8 @@ fi
   actor_rollout_ref.actor.kl_loss_coef=$ACTOR_KL_LOSS_COEF \
   actor_rollout_ref.actor.clip_ratio_low=$ACTOR_CLIP_RATIO_LOW \
   actor_rollout_ref.actor.clip_ratio_high=$ACTOR_CLIP_RATIO_HIGH \
+  actor_rollout_ref.actor.self_certainty_use_raw_logits=$SELF_CERTAINTY_USE_RAW_LOGITS \
+  actor_rollout_ref.actor.self_certainty_chunk_size=$SELF_CERTAINTY_CHUNK_SIZE \
   actor_rollout_ref.actor.use_papo_prcp_loss=$USE_PAPO_PRCP_LOSS \
   actor_rollout_ref.actor.papo_valid_only=$PAPO_VALID_ONLY \
   actor_rollout_ref.actor.papo_kl_prcp_coef=$PAPO_KL_PRCP_COEF \
@@ -213,6 +219,7 @@ fi
   algorithm.visual_dep_raw_clip=$VISUAL_DEP_RAW_CLIP \
   algorithm.visual_dep_z_clip=$VISUAL_DEP_Z_CLIP \
   algorithm.visual_dep_valid_answer_only=$VISUAL_DEP_VALID_ONLY \
+  algorithm.reward_signal=$REWARD_SIGNAL \
   algorithm.adv_estimator=$ADVANTAGE \
   trainer.logger=['console'] \
   trainer.project_name=$WANDB_PROJECT \

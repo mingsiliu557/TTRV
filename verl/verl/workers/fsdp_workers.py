@@ -636,17 +636,34 @@ class ActorRolloutRefWorker(Worker):
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data)
             return_response_embeddings = bool(data.meta_info.get("return_response_embeddings", False))
+            calculate_self_certainty = bool(data.meta_info.get("calculate_self_certainty", False))
             log_probs_result = self.actor.compute_log_prob(
                 data=data,
                 calculate_entropy=True,
                 return_response_embeddings=return_response_embeddings,
+                calculate_self_certainty=calculate_self_certainty,
             )
-            if return_response_embeddings:
+            if return_response_embeddings and calculate_self_certainty:
+                output, entropys, response_embeddings, self_certainties = log_probs_result
+                tensors = {
+                    "old_log_probs": output,
+                    "entropys": entropys,
+                    "response_embeddings": response_embeddings,
+                    "self_certainties": self_certainties,
+                }
+            elif return_response_embeddings:
                 output, entropys, response_embeddings = log_probs_result
                 tensors = {
                     "old_log_probs": output,
                     "entropys": entropys,
                     "response_embeddings": response_embeddings,
+                }
+            elif calculate_self_certainty:
+                output, entropys, self_certainties = log_probs_result
+                tensors = {
+                    "old_log_probs": output,
+                    "entropys": entropys,
+                    "self_certainties": self_certainties,
                 }
             else:
                 output, entropys = log_probs_result

@@ -68,11 +68,24 @@ def run_ppo(config) -> None:
     # isolation, will solve in the future
     os.environ["ENSURE_CUDA_VISIBLE_DEVICES"] = os.environ.get("CUDA_VISIBLE_DEVICES", "")
     if not ray.is_initialized():
-        # this is for local ray cluster
+        ray_init_kwargs = {}
+        ray_tmpdir = os.environ.get("RAY_TMPDIR")
+        if ray_tmpdir:
+            os.makedirs(ray_tmpdir, exist_ok=True)
+            ray_init_kwargs["_temp_dir"] = ray_tmpdir
+        if os.environ.get("SLURM_JOB_ID") or os.environ.get("CLUSTER_VERIFIED_JOB_ID"):
+            import torch
+            ray_init_kwargs.update(
+                num_cpus=int(os.environ.get("SLURM_CPUS_PER_TASK", os.environ.get("TTRV_ALLOCATED_CPUS", "4"))),
+                num_gpus=torch.cuda.device_count(),
+                include_dashboard=False,
+                object_store_memory=int(os.environ.get("TTRV_RAY_OBJECT_STORE_BYTES", "268435456")),
+            )
         ray.init(
             runtime_env={
                 "env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN"}
-            }
+            },
+            **ray_init_kwargs,
         )
 
     runner = TaskRunner.remote()

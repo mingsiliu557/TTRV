@@ -53,6 +53,8 @@ actor_rollout_ref:
     clip_ratio_c: 3.0 # lower bound of the value for Dual-clip PPO from https://arxiv.org/pdf/1912.09729
     loss_agg_mode: "token-mean" # / "seq-mean-token-sum" / "seq-mean-token-mean"
     entropy_coeff: 0
+    self_certainty_use_raw_logits: True
+    self_certainty_chunk_size: 256
     use_papo_prcp_loss: False
     papo_valid_only: False
     papo_kl_prcp_coef: 0.01
@@ -223,6 +225,7 @@ algorithm:
   gamma: 1.0
   lam: 1.0
   adv_estimator: gae
+  reward_signal: ttrv
   use_kl_in_reward: False
   use_visual_dep_reward: False
   visual_dep_coef: 0.2
