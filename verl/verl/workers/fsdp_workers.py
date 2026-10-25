@@ -45,6 +45,7 @@ from verl.utils.fsdp_utils import (
     offload_fsdp_optimizer,
 )
 from verl.utils.import_utils import import_external_libs
+from verl.utils.gpu_checkpoint import load_model_on_gpu
 from verl.utils.model import compute_position_id_with_mask
 from verl.workers.sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
 
@@ -189,7 +190,9 @@ class ActorRolloutRefWorker(Worker):
             torch_dtype = PrecisionType.to_dtype(torch_dtype)
 
         # override model kwargs
-        actor_model_config = AutoConfig.from_pretrained(local_path, trust_remote_code=trust_remote_code)
+        actor_model_config = AutoConfig.from_pretrained(
+            local_path, trust_remote_code=trust_remote_code, local_files_only=True
+        )
 
         self.generation_config = get_generation_config(local_path, trust_remote_code=trust_remote_code)
 
@@ -210,12 +213,7 @@ class ActorRolloutRefWorker(Worker):
             }
             print(f"Model config after override: {config_summary}")
 
-        # NOTE(fix me): tie_word_embedding causes meta_tensor init to hang
-        init_context = get_init_weight_context_manager(
-            use_meta_tensor=not actor_model_config.tie_word_embeddings, mesh=self.device_mesh
-        )
-
-        with init_context(), warnings.catch_warnings():
+        with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             if type(actor_model_config) in AutoModelForVision2Seq._model_mapping.keys():
                 actor_module_class = AutoModelForVision2Seq
@@ -224,19 +222,16 @@ class ActorRolloutRefWorker(Worker):
             else:
                 actor_module_class = AutoModelForCausalLM
 
-            # model_init_kwargs = dict(attn_implementation="eager")
-            # if re.match("internvl", actor_model_config.model_type, re.IGNORECASE):
-            #     if "flash_attention_2" in model_init_kwargs.get("attn_implementation"):
-            #         model_init_kwargs.pop("attn_implementation")
-            #         model_init_kwargs["use_flash_attn"] = True
-
-            actor_module = actor_module_class.from_pretrained(
-                pretrained_model_name_or_path=local_path,
+            actor_module = load_model_on_gpu(
+                model_class=actor_module_class,
+                model_path=local_path,
                 torch_dtype=torch_dtype,
                 config=actor_model_config,
-                attn_implementation="eager",
                 trust_remote_code=trust_remote_code,
             )
+
+            if self.generation_config is not None:
+                actor_module.generation_config = self.generation_config
 
             use_orig_params = False
             frozen_vision_tower = False
