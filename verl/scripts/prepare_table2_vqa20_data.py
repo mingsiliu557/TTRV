@@ -8,7 +8,7 @@ import datasets
 
 
 DATASETS = ("ai2d", "mathverse", "mathvista", "mme", "realworldqa", "seed")
-OLD_PREFIX = "/home/anirban/kanksha1/"
+OLD_PREFIX = "/workspace/user/kanksha1/"
 
 
 def _load_json(path: Path) -> list[dict[str, Any]]:
@@ -106,10 +106,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare relocated Table 2 VQA 20-shot JSON/parquet files for TTRV/verl.")
     parser.add_argument("--datasets", nargs="+", default=list(DATASETS), choices=DATASETS)
     parser.add_argument("--template-root", default="verl/data")
-    parser.add_argument("--output-root", default="/jiigan-hp/ttrv-datasets/verl_data")
-    parser.add_argument("--data-root", default="/jiigan-hp/ttrv-datasets")
+    parser.add_argument("--output-root", default="/data/ttrv/verl_data")
+    parser.add_argument("--data-root", default="/data/ttrv")
     parser.add_argument("--allow-missing-images", action="store_true")
-    parser.add_argument("--summary-path", default="/jiigan-hp/ttrv-datasets/verl_data/table2_vqa20_prepare_summary.json")
+    parser.add_argument("--summary-path", default="/data/ttrv/verl_data/table2_vqa20_prepare_summary.json")
     args = parser.parse_args()
 
     output_root = Path(args.output_root)

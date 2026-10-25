@@ -240,12 +240,17 @@ class vLLMRollout(BaseRollout):
                 "n": 1,  # if greedy, only 1 response
             }
         elif is_validate:
-            # TODO: try **
+            validation_sample_n = int(prompts.meta_info.get("validation_sample_n", 1))
+            if validation_sample_n < 1:
+                raise ValueError(f"validation_sample_n must be positive, got {validation_sample_n}")
             kwargs = {
                 "top_k": self.config.val_kwargs.top_k,
                 "top_p": self.config.val_kwargs.top_p,
                 "temperature": self.config.val_kwargs.temperature,
-                "n": 1,  # if validate, already repeat in ray_trainer
+                # Standard validation repeats prompts in ray_trainer and keeps
+                # this at one. Diagnostic training-style sampling sends each
+                # prompt once and requests all vote samples in this call.
+                "n": validation_sample_n,
             }
 
         # users can customize different sampling_params at different run

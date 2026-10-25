@@ -22,7 +22,58 @@ __pycache__/
 .ipynb_checkpoints/
 .cache/
 
-# Local markdown experiment notes and reports.
-*.md
-!/README.md
-!/AGENTS.md
+# Credentials and private local configuration (keep safe templates).
+.env
+.env.*
+!.env.example
+!.env.template
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+.ssh/
+.aws/
+.netrc
+.git-credentials
+credentials.json
+service-account*.json
+config.local.*
+*.local.env
+
+# Machine-specific agent/editor state and operational notes.
+.codex/
+.agents/
+.vscode/
+.idea/
+AGENTS.md
+/.docs/
+/handoff/
+/local/
+/local_config/
+/local_scripts/
+/private/
+
+# Generated run artifacts, not experiment source or configuration templates.
+**/logs/
+**/results/
+**/output/
+**/wandb/
+**/tensorboard/
+*.log
+slurm-*.out
+*.pid
+*.sock
+/attention_visualization/
+/obv1_cases/
+/obv2_cases/
+/obv3_case_study/
+/archived_experiment_files/
+
+# Local environments and tooling caches.
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store

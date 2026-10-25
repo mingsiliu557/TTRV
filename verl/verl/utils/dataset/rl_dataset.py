@@ -144,24 +144,14 @@ class RLHFDataset(Dataset):
             tokenizer = self.tokenizer
             processor = self.processor
             prompt_key = self.prompt_key
-            image_key = self.image_key
-            video_key = self.video_key
 
             if processor is not None:
 
                 def doc2len(doc) -> int:
-                    messages = self._build_messages(doc)
-                    raw_prompt = self.processor.apply_chat_template(
-                        messages, add_generation_prompt=True, tokenize=False
-                    )
-                    images = (
-                        [self.preprocessor.process_image(image) for image in messages.pop(image_key)] if image_key in messages else None
-                    )
-                    videos = (
-                        [self.preprocessor.process_video(video) for video in messages.pop(video_key)] if video_key in messages else None
-                    )
-
-                    return len(processor(text=[raw_prompt], images=images, videos=videos)["input_ids"][0])
+                    example = copy.deepcopy(doc)
+                    messages = self._build_messages(example)
+                    _, _, input_ids, _, _ = self.preprocessor(messages, example)
+                    return len(input_ids[0])
 
             else:
 

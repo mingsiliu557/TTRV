@@ -1318,7 +1318,7 @@ class RayPPOTrainer:
         self.train_dataloader = StatefulDataLoader(
             dataset=self.train_dataset,
             batch_size=self.config.data.get("gen_batch_size", self.config.data.train_batch_size),
-            num_workers=8,
+            num_workers=int(os.environ.get("TTRV_DATALOADER_WORKERS", "8")),
             drop_last=True,
             collate_fn=collate_fn,
             sampler=sampler,
@@ -1336,7 +1336,7 @@ class RayPPOTrainer:
             # Validation datasets are sent to inference engines as a whole batch,
             # which will schedule the memory themselves.
             batch_size=20, # double check this ==> reduce it to 400
-            num_workers=8,
+            num_workers=int(os.environ.get("TTRV_DATALOADER_WORKERS", "8")),
             shuffle=False,
             drop_last=False,
             collate_fn=collate_fn,
@@ -1554,12 +1554,22 @@ class RayPPOTrainer:
         sample_scores = []
 
         for test_data in self.val_dataloader:
-            test_batch = DataProto.from_single_dict(test_data)
-
-            # repeat test batch
-            test_batch = test_batch.repeat(
-                repeat_times=self.config.actor_rollout_ref.rollout.val_kwargs.n, interleave=True
+            source_test_batch = DataProto.from_single_dict(test_data)
+            val_sample_n = int(self.config.actor_rollout_ref.rollout.val_kwargs.n)
+            use_training_style_sampling = (
+                _bool_env_flag("TTRL_VAL_TRAINING_STYLE_SAMPLING")
+                and bool(self.config.actor_rollout_ref.rollout.val_kwargs.do_sample)
+                and val_sample_n > 1
             )
+
+            # Keep validation bookkeeping at bs * n. In training-style mode the
+            # generator still receives each prompt once and samples n responses
+            # in one request, matching the TTRL vote rollout path.
+            test_batch = source_test_batch.repeat(repeat_times=val_sample_n, interleave=True)
+            generation_source_batch = source_test_batch if use_training_style_sampling else test_batch
+            selection_multi_modal_data = None
+            if _bool_env_flag("TTRL_SELECTION_EVAL"):
+                selection_multi_modal_data = test_batch.non_tensor_batch.get("multi_modal_data")
 
             # we only do validation on rule-based rm
             if self.config.reward_model.enable and test_batch[0].non_tensor_batch["reward_model"]["style"] == "model":
@@ -1572,16 +1582,21 @@ class RayPPOTrainer:
             sample_inputs.extend(input_texts)
             metric_inputs.extend(self._build_validation_metric_inputs(test_batch, input_texts, sample_offset=len(metric_inputs)))
 
-            if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
-                test_gen_batch = test_batch.pop(
+            if "multi_modal_inputs" in generation_source_batch.non_tensor_batch.keys():
+                pop_kwargs = dict(
                     batch_keys=["input_ids", "attention_mask", "position_ids"],
                     non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
                 )
             else:
-                test_gen_batch = test_batch.pop(
+                pop_kwargs = dict(
                     batch_keys=["input_ids", "attention_mask", "position_ids"],
                     non_tensor_batch_keys=["raw_prompt_ids"],
                 )
+            test_gen_batch = generation_source_batch.pop(**pop_kwargs)
+            if use_training_style_sampling:
+                # The aligned reward batch is a separate bs * n copy. Strip the
+                # generation fields from it before unioning generated outputs.
+                test_batch.pop(**pop_kwargs)
 
             test_gen_batch.meta_info = {
                 "eos_token_id": self.tokenizer.eos_token_id,
@@ -1589,15 +1604,25 @@ class RayPPOTrainer:
                 "recompute_log_prob": False,
                 "do_sample": self.config.actor_rollout_ref.rollout.val_kwargs.do_sample,
                 "validate": True,
+                "validation_sample_n": val_sample_n if use_training_style_sampling else 1,
             }
             print(f"test_gen_batch meta info: {test_gen_batch.meta_info}")
 
             # pad to be divisible by dp_size
-            test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
+            test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(
+                test_gen_batch, self.actor_rollout_wg.world_size
+            )
             test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(test_gen_batch_padded)
 
             # unpad
-            test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=pad_size)
+            output_pad_size = pad_size * val_sample_n if use_training_style_sampling else pad_size
+            test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=output_pad_size)
+            if len(test_output_gen_batch) != len(test_batch):
+                raise RuntimeError(
+                    "Validation generation size mismatch: "
+                    f"outputs={len(test_output_gen_batch)}, expected={len(test_batch)}, "
+                    f"training_style={use_training_style_sampling}, n={val_sample_n}, pad_size={pad_size}"
+                )
             print("validation generation end")
 
             # Store generated outputs
@@ -1606,6 +1631,10 @@ class RayPPOTrainer:
             sample_outputs.extend(output_texts)
 
             test_batch = test_batch.union(test_output_gen_batch)
+            if selection_multi_modal_data is not None and "multi_modal_data" not in test_batch.non_tensor_batch:
+                # Pixel-space visual-dependency scoring needs the original PIL
+                # images after rollout generation has consumed its input copy.
+                test_batch.non_tensor_batch["multi_modal_data"] = selection_multi_modal_data
 
             # evaluate using reward_function
             if _bool_env_flag("TTRL_SELECTION_EVAL"):

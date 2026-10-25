@@ -638,6 +638,46 @@ def _choice_majority_vote_rewards(model_answers, choice_labels=None):
     }
 
 
+def _valid_majority_vote_rewards(
+    model_answers,
+    choice_labels=None,
+    use_choice_labels=True,
+    numeric_valid=False,
+):
+    choice_labels = _parse_choice_labels(choice_labels)
+    if use_choice_labels:
+        canonical_answers = [_normalize_choice_answer(answer, choice_labels=choice_labels) for answer in model_answers]
+        valid_counter = _choice_counter(canonical_answers, choice_labels=choice_labels)
+        valid_answer_mode = "choice"
+    elif numeric_valid:
+        canonical_answers = [_normalize_numeric_answer(answer) for answer in model_answers]
+        valid_counter = Counter(answer for answer in canonical_answers if answer != UNKNOWN_LABEL)
+        valid_answer_mode = "numeric"
+    else:
+        # Direct/open-ended tasks use the parser-normalized short answer itself.
+        # We only drop empty/unknown outputs; no closed-choice valid set is applied.
+        canonical_answers = [_normalize_freeform_answer(answer) for answer in model_answers]
+        valid_counter = Counter(answer for answer in canonical_answers if answer != UNKNOWN_LABEL)
+        valid_answer_mode = "freeform"
+
+    valid_total = sum(valid_counter.values())
+    estimated_label, majority_count = _majority_label(valid_counter)
+    if estimated_label == UNKNOWN_LABEL:
+        rewards = [0.0 for _ in canonical_answers]
+    else:
+        rewards = [1.0 if answer == estimated_label else 0.0 for answer in canonical_answers]
+
+    return rewards, valid_counter, {
+        "original_answers": canonical_answers,
+        "valid_majority_label": estimated_label,
+        "valid_majority_count": int(majority_count),
+        "valid_counter": dict(valid_counter),
+        "valid_vote_ratio": valid_total / len(canonical_answers) if canonical_answers else 0.0,
+        "valid_normalized_entropy": _normalized_entropy(valid_counter, valid_total),
+        "valid_answer_mode": valid_answer_mode,
+    }
+
+
 def _vision_self_harmony_rewards(
     task,
     original_answers,
@@ -1259,6 +1299,21 @@ def test_time_train_metrics(
         majority_count = details["choice_majority_count"]
         normalized_entropy = details["choice_normalized_entropy"]
         actual_reward_mean_key = "choice_majority_vote_reward"
+    elif reward_style == "valid_majority_vote":
+        rewards_en, valid_counter, details = _valid_majority_vote_rewards(
+            model_answers,
+            choice_labels=choice_labels,
+            use_choice_labels=use_choice_labels,
+            numeric_valid=use_numeric_valid,
+        )
+        model_answers = details["original_answers"]
+        counter = Counter(model_answers)
+        total = len(model_answers)
+        rewards = rewards_en
+        estimated_label = details["valid_majority_label"]
+        majority_count = details["valid_majority_count"]
+        normalized_entropy = details["valid_normalized_entropy"]
+        actual_reward_mean_key = "valid_majority_vote_reward"
     elif reward_style == "vision_self_harmony":
         if transform_solutions is None:
             raise ValueError("vision_self_harmony requires transform_solutions")
@@ -1450,6 +1505,13 @@ def test_time_train_metrics(
         )
     if reward_style == "choice_majority_vote":
         ttrl_metrics["choice_valid_ratio"] = details["choice_valid_ratio"]
+    if reward_style == "valid_majority_vote":
+        ttrl_metrics["valid_vote_ratio"] = details["valid_vote_ratio"]
+        ttrl_metrics["valid_normalized_entropy"] = details["valid_normalized_entropy"]
+        ttrl_metrics["valid_majority_vote_count"] = details["valid_majority_count"]
+        ttrl_metrics["invalid_ratio"] = 1.0 - details["valid_vote_ratio"]
+        if details.get("valid_answer_mode") == "numeric":
+            ttrl_metrics["numeric_valid_ratio"] = details["valid_vote_ratio"]
     if reward_style == "vision_self_harmony":
         for key in [
             "harmony_label_accuracy",

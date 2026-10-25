@@ -216,10 +216,7 @@ class TTRLRewardManager:
             summary = self._prediction_summary(predictions, group[0].get("ground_truth"))
             reward_summary = self._reward_selection_summary(group)
             pass_at_n = any(bool(record.get("correct")) for record in group)
-            majority_correct = bool(
-                _normalize_choice_answer(summary.get("majority_prediction"), choice_labels=self.answer_choice_labels)
-                == _normalize_choice_answer(group[0].get("ground_truth"), choice_labels=self.answer_choice_labels)
-            )
+            majority_correct = summary.get("majority_prediction") == group[0].get("ground_truth")
             invalid_count = sum(1 for prediction in predictions if str(prediction).strip().lower() == "unknown")
             grouped_records.append(
                 {
@@ -867,10 +864,7 @@ class TTRLRewardManager:
                     selection_rewards.append(float(final_reward))
                     prediction = predictions[i]
                     label = group_labels[i]
-                    correct = bool(
-                        _normalize_choice_answer(prediction, choice_labels=self.answer_choice_labels)
-                        == _normalize_choice_answer(label, choice_labels=self.answer_choice_labels)
-                    )
+                    correct = prediction == label
                     true_rewards.append(float(correct))
                     last_index = max(0, group_response_lengths[i] - 1)
                     reward_tensor[row, last_index] = float(final_reward)
@@ -904,10 +898,7 @@ class TTRLRewardManager:
                 selection_idx = int(np.argmax(selection_rewards)) if selection_rewards else -1
                 majority_summary = self._prediction_summary(predictions, group_labels[0] if group_labels else None)
                 reward_selection_correct = bool(true_rewards[selection_idx]) if selection_idx >= 0 else False
-                majority_correct = bool(
-                    _normalize_choice_answer(majority_summary.get("majority_prediction"), choice_labels=self.answer_choice_labels)
-                    == _normalize_choice_answer(group_labels[0], choice_labels=self.answer_choice_labels)
-                ) if group_labels else False
+                majority_correct = majority_summary.get("majority_prediction") == group_labels[0] if group_labels else False
                 all_selection_metrics["selection_reward_accuracy"].append(float(reward_selection_correct))
                 all_selection_metrics["selection_majority_accuracy"].append(float(majority_correct))
                 all_selection_metrics[f"selection_pass@{self.eval_n_samples}"].append(float(any(true_rewards)))
