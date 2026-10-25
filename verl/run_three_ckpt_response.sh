@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-cd /root/autodl-tmp/TTRV/verl
+cd /workspace/TTRV/verl
 
 RUN_TAG="${RUN_TAG:-$(date +%m%d_%H%M%S)}"
 
@@ -15,7 +15,7 @@ export N_VOTES_PER_PROMPT="${N_VOTES_PER_PROMPT:-32}"
 export N_SAMPLES_PER_PROMPT="${N_SAMPLES_PER_PROMPT:-16}"
 export ANSWER_PARSE_MODE="${ANSWER_PARSE_MODE:-legacy}"
 export PYTHON_BIN="${PYTHON_BIN:-/root/miniconda3/envs/ttrv/bin/python}"
-export HF_HOME="${HF_HOME:-/root/autodl-tmp/.cache/huggingface}"
+export HF_HOME="${HF_HOME:-/workspace/.cache/huggingface}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 

@@ -4,7 +4,7 @@ set -Eeuo pipefail
 # ray stop
 unset VLLM_ATTENTION_BACKEND
 export VLLM_USE_V1="${VLLM_USE_V1:-1}"
-export HF_HOME="${HF_HOME:-/root/autodl-tmp/.cache/huggingface}"
+export HF_HOME="${HF_HOME:-/workspace/.cache/huggingface}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 
