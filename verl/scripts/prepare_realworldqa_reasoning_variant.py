@@ -73,8 +73,8 @@ def _write_split(rows: list[dict], output_dir: Path, split: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build RealWorldQA-specific kv_short prompt variant.")
-    parser.add_argument("--source-dir", default="/jiigan-hp/ttrv-datasets/verl_data/realworldqa_20")
-    parser.add_argument("--output-root", default="/jiigan-hp/ttrv-datasets/verl_data/realworldqa_20_reasoning_kv_short")
+    parser.add_argument("--source-dir", default="/data/ttrv/verl_data/realworldqa_20")
+    parser.add_argument("--output-root", default="/data/ttrv/verl_data/realworldqa_20_reasoning_kv_short")
     parser.add_argument("--test-limit", type=int, default=-1)
     parser.add_argument("--train-limit", type=int, default=-1)
     parser.add_argument("--variants", nargs="+", default=["kv_short"], choices=VARIANTS)
