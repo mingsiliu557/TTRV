@@ -35,16 +35,19 @@ COCO_VAL_URL = "http://images.cocodataset.org/zips/val2017.zip"
 DATASET_SPECS = {
     "visualsimpleqa": {
         "source_task": "visualsimpleqa_da",
+        "pool_task": "visualsimpleqa_da_hq_pool80_seed42",
         "data_source": "VisualSimpleQA-TTT",
         "metric": "visualsimpleqa",
     },
     "ocrbench_v1": {
         "source_task": "ocrbench_v1",
+        "pool_task": "ocrbench_v1_hq_pool80_seed42",
         "data_source": "OCRBench-TTT",
         "metric": "ocrbench",
     },
     "aokvqa_da_val": {
         "source_task": "aokvqa_da_val",
+        "pool_task": "aokvqa_da_val_hq_pool80_seed42",
         "data_source": "AOKVQA-DA-TTT",
         "metric": "aokvqa_direct_answer",
     },
@@ -233,9 +236,11 @@ def choose_examples(examples: list[dict[str, Any]], size: int, seed: int) -> lis
 def materialize_tasks(dataset_key: str, examples: list[dict[str, Any]], args: argparse.Namespace) -> dict[str, Any]:
     spec = DATASET_SPECS[dataset_key]
     source_train = choose_examples(examples, args.train_size, args.seed)
+    pool_train = choose_examples(examples, args.pool_size, args.seed)
     common = {
         "dataset_key": dataset_key,
         "selection_seed": args.seed,
+        "note": "Pool task is for base 32-sample majority scan; final HQ20 task is produced after scan.",
     }
     source_summary = write_task(
         Path(args.output_root),
@@ -244,7 +249,14 @@ def materialize_tasks(dataset_key: str, examples: list[dict[str, Any]], args: ar
         examples,
         {**common, "selection_rule": f"seeded source train sample size {len(source_train)}"},
     )
-    return {"source": source_summary}
+    pool_summary = write_task(
+        Path(args.output_root),
+        spec["pool_task"],
+        pool_train,
+        examples,
+        {**common, "selection_rule": f"seeded HQ candidate pool size {len(pool_train)}"},
+    )
+    return {"source": source_summary, "pool": pool_summary}
 
 
 def prepare_visualsimpleqa(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -497,13 +509,14 @@ def prepare_aokvqa_da_val(args: argparse.Namespace) -> list[dict[str, Any]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare direct-answer VQA datasets for TTRV/verl.")
     parser.add_argument("--datasets", nargs="+", default=list(DATASET_SPECS), choices=list(DATASET_SPECS))
-    parser.add_argument("--data-root", default="/jiigan-hp/ttrv-datasets")
-    parser.add_argument("--output-root", default="/jiigan-hp/ttrv-datasets/verl_data")
-    parser.add_argument("--hf-home", default="/jiigan-hp/ttrv-datasets/hf_home")
+    parser.add_argument("--data-root", default="/data/ttrv")
+    parser.add_argument("--output-root", default="/data/ttrv/verl_data")
+    parser.add_argument("--hf-home", default="/data/ttrv/hf_home")
     parser.add_argument("--proxy", default="127.0.0.1:7892")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--train-size", type=int, default=20)
-    parser.add_argument("--summary-path", default="/jiigan-hp/ttrv-datasets/verl_data/direct_answer_vqa_prepare_summary.json")
+    parser.add_argument("--pool-size", type=int, default=80)
+    parser.add_argument("--summary-path", default="/data/ttrv/verl_data/direct_answer_vqa_prepare_summary.json")
     parser.add_argument("--visualsimpleqa-repo", default=VISUAL_REPO)
     parser.add_argument("--visualsimpleqa-config", default="VisualSimpleQA")
     parser.add_argument("--visualsimpleqa-split", default="test")

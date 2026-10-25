@@ -307,16 +307,16 @@ def _prepare_crpe(args: argparse.Namespace) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare CAPTURe/CRPE 20-shot data for the current TTRV/verl layout.")
     parser.add_argument("--datasets", nargs="+", default=["capture", "crpe"], choices=["capture", "crpe"])
-    parser.add_argument("--data-root", default="/jiigan-hp/ttrv-datasets")
-    parser.add_argument("--hf-home", default="/jiigan-hp/ttrv-datasets/hf_home")
+    parser.add_argument("--data-root", default="/data/ttrv")
+    parser.add_argument("--hf-home", default="/data/ttrv/hf_home")
     parser.add_argument("--template-root", default="verl/data")
-    parser.add_argument("--output-root", default="/jiigan-hp/ttrv-datasets/verl_data")
+    parser.add_argument("--output-root", default="/data/ttrv/verl_data")
     parser.add_argument("--capture-snapshot", default="")
     parser.add_argument("--crpe-jsonl", default="crpe_relation.jsonl")
     parser.add_argument("--train-size", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-image-size", type=int, default=1000)
-    parser.add_argument("--summary-path", default="/jiigan-hp/ttrv-datasets/verl_data/capture_crpe20_prepare_summary.json")
+    parser.add_argument("--summary-path", default="/data/ttrv/verl_data/capture_crpe20_prepare_summary.json")
     args = parser.parse_args()
 
     results = {}
