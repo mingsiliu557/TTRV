@@ -12,7 +12,7 @@ export NO_GPU="${NO_GPU:-4}"
 export EPISODE="${EPISODE:-20}"
 export BACKBONE_PATH="${BACKBONE_PATH:-OpenGVLab/InternVL3-2B}"
 export DATA_LOCAL_DIR="${DATA_LOCAL_DIR:-$VERL_DIR/data}"
-export IMAGE_ROOT="${IMAGE_ROOT:-/root/autodl-tmp/datasets/dtd}"
+export IMAGE_ROOT="${IMAGE_ROOT:-/workspace/datasets/dtd}"
 export FORCE_PREPROCESS="${FORCE_PREPROCESS:-0}"
 
 export http_proxy="${http_proxy:-http://127.0.0.1:7892}"

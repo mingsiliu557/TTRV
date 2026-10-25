@@ -13,7 +13,7 @@ from PIL import Image
 
 DATASETS = ("ai2d", "mathverse", "mathvista", "mme", "realworldqa", "seed")
 
-OLD_PREFIX = "/home/anirban/kanksha1/"
+OLD_PREFIX = "/workspace/user/kanksha1/"
 
 HF_DATASETS = {
     "ai2d": ("lmms-lab/ai2d", None, None),
@@ -322,9 +322,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Download Table 2 VQA images needed by local TTRV *_20 templates.")
     parser.add_argument("--datasets", nargs="+", default=list(DATASETS), choices=DATASETS)
     parser.add_argument("--template-root", default="verl/data")
-    parser.add_argument("--data-root", default="/jiigan-hp/ttrv-datasets")
-    parser.add_argument("--cache-dir", default=os.environ.get("HF_HOME", "/jiigan-hp/ttrv-datasets/hf_home"))
-    parser.add_argument("--summary-path", default="/jiigan-hp/ttrv-datasets/verl_data/table2_vqa20_download_summary.json")
+    parser.add_argument("--data-root", default="/data/ttrv")
+    parser.add_argument("--cache-dir", default=os.environ.get("HF_HOME", "/data/ttrv/hf_home"))
+    parser.add_argument("--summary-path", default="/data/ttrv/verl_data/table2_vqa20_download_summary.json")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--limit-hf-rows", type=int, default=-1, help="Debug limit for prompt-matched HF datasets.")
     args = parser.parse_args()

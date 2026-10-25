@@ -12,7 +12,7 @@ import datasets
 from PIL import Image as PILImage
 
 
-OLD_PREFIX = "/home/anirban/kanksha1/realworldqa/images/"
+OLD_PREFIX = "/workspace/user/kanksha1/realworldqa/images/"
 
 
 def _load_json(path: Path) -> list[dict[str, Any]]:
@@ -244,9 +244,9 @@ def main() -> None:
         description="Prepare RealWorldQA data with HF-question aligned images resized to the TTRV 1000x1000 protocol."
     )
     parser.add_argument("--template-dir", default="verl/data/realworldqa_20")
-    parser.add_argument("--output-dir", default="/jiigan-hp/ttrv-datasets/verl_data/realworldqa_20_aligned_1000")
-    parser.add_argument("--image-root", default="/jiigan-hp/ttrv-datasets/realworldqa_aligned_1000/images")
-    parser.add_argument("--cache-dir", default="/jiigan-hp/ttrv-datasets/hf_home")
+    parser.add_argument("--output-dir", default="/data/ttrv/verl_data/realworldqa_20_aligned_1000")
+    parser.add_argument("--image-root", default="/data/ttrv/realworldqa_aligned_1000/images")
+    parser.add_argument("--cache-dir", default="/data/ttrv/hf_home")
     parser.add_argument("--resize-size", type=int, default=1000)
     parser.add_argument("--overwrite-images", action="store_true")
     args = parser.parse_args()

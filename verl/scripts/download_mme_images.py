@@ -11,8 +11,8 @@ def main() -> None:
     parser.add_argument("--dataset-id", default="MM-Hallu/MME")
     parser.add_argument("--split", default="test")
     parser.add_argument("--local-parquet-dir", default=None)
-    parser.add_argument("--output-root", default="/jiigan-hp/ttrv-datasets/MME/images")
-    parser.add_argument("--cache-dir", default="/jiigan-hp/ttrv-datasets/hf_home/datasets")
+    parser.add_argument("--output-root", default="/data/ttrv/MME/images")
+    parser.add_argument("--cache-dir", default="/data/ttrv/hf_home/datasets")
     parser.add_argument("--summary-path", default=None)
     args = parser.parse_args()
 
