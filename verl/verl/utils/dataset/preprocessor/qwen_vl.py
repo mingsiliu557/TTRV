@@ -19,10 +19,16 @@ The QwenVL2 preprocessor used for the multi-modal models.
 
 from io import BytesIO
 from typing import Optional, Union
+import inspect
 import os
 import torch
 from PIL import Image
 from qwen_vl_utils import fetch_image, fetch_video
+
+try:
+    from qwen_vl_utils.vision_process import SPATIAL_MERGE_SIZE
+except ImportError:
+    SPATIAL_MERGE_SIZE = 2
 
 from .base_processor import BasicPreprocessor
 from .registry import PREPROCESSOR_REGISTER
@@ -36,6 +42,18 @@ MAX_RATIO = 200
 
 VIDEO_MIN_PIXELS = 128 * 28 * 28
 VIDEO_TOTAL_PIXELS = int(float(os.environ.get('VIDEO_MAX_PIXELS', 128000 * 28 * 28 * 0.9)))
+
+_FETCH_IMAGE_PARAMETERS = inspect.signature(fetch_image).parameters
+_FETCH_VIDEO_PARAMETERS = inspect.signature(fetch_video).parameters
+
+
+def _image_patch_size(size_factor: int) -> int:
+    if size_factor % SPATIAL_MERGE_SIZE != 0:
+        raise ValueError(
+            f"size_factor={size_factor} must be divisible by "
+            f"SPATIAL_MERGE_SIZE={SPATIAL_MERGE_SIZE}"
+        )
+    return size_factor // SPATIAL_MERGE_SIZE
 
 VIDEO_FORMAT_HELP = """Currently, we only support the video formats introduced in qwen2-vl.
 Refer to https://github.com/QwenLM/Qwen2.5-VL?tab=readme-ov-file#using---transformers-to-chat.
@@ -67,24 +85,41 @@ eg.
 class QwenVLPreProcessor(BasicPreprocessor):
     def __init__(self, processor, image_key="image", video_key="video", **kwargs):
         super().__init__(processor, image_key=image_key, video_key=video_key)
-        self.max_pixels = kwargs.get("max_pixels", MAX_PIXELS)
-        self.min_pixels = kwargs.get("min_pixels", MIN_PIXELS)
+        image_processor = getattr(processor, "image_processor", None)
+        processor_max_pixels = getattr(image_processor, "max_pixels", MAX_PIXELS)
+        processor_min_pixels = getattr(image_processor, "min_pixels", MIN_PIXELS)
+        configured_max_pixels = int(os.environ.get("QWEN_MAX_PIXELS", processor_max_pixels))
+        configured_min_pixels = int(os.environ.get("QWEN_MIN_PIXELS", processor_min_pixels))
+        self.max_pixels = int(kwargs.get("max_pixels", configured_max_pixels))
+        self.min_pixels = int(kwargs.get("min_pixels", configured_min_pixels))
         self.factor = kwargs.get("factor", IMAGE_FACTOR)
         self.video_min_pixels = kwargs.get("video_min_pixels", VIDEO_MIN_PIXELS)
         self.video_total_pixels = kwargs.get("video_total_pixels", VIDEO_TOTAL_PIXELS)
     
     def process_image(self, image, **kwargs) -> torch.Tensor:
-        if isinstance(image, Image.Image):
-            return image.convert("RGB")
         max_pixels = kwargs.get("max_pixels", self.max_pixels)
         min_pixels = kwargs.get("min_pixels", self.min_pixels)
         factor = kwargs.get("size_factor", self.factor)
+        if isinstance(image, Image.Image):
+            # Parquet image features are decoded as PIL objects. Passing those
+            # through unchanged lets vLLM reprocess the original full-resolution
+            # image, while Transformers uses its configured pixel cap. Normalize
+            # both paths through fetch_image so rollout and actor see identical
+            # image geometry and multimodal token counts.
+            image = {"image": image.convert("RGB")}
+        else:
+            image = dict(image)
         if "bytes" in image:
             assert "image" not in image, "Cannot have both `bytes` and `image`"
             image["image"] = BytesIO(image["bytes"])
         image["max_pixels"] = max_pixels
         image["min_pixels"] = min_pixels
-        image = fetch_image(image, size_factor=factor)
+        if "size_factor" in _FETCH_IMAGE_PARAMETERS:
+            image = fetch_image(image, size_factor=factor)
+        elif "image_patch_size" in _FETCH_IMAGE_PARAMETERS:
+            image = fetch_image(image, image_patch_size=_image_patch_size(factor))
+        else:
+            image = fetch_image(image)
         return image
     def process_audio(self, audio, **kwargs):
         raise ValueError("QwenVL series does not support audio input")
@@ -121,4 +156,9 @@ class QwenVLPreProcessor(BasicPreprocessor):
         video["min_pixels"] = video_min_pixels
         return_video_sample_fps = kwargs.get("return_video_sample_fps", False)
         image_factor = kwargs.get("image_factor", self.factor)
-        return fetch_video(video, image_factor=image_factor, return_video_sample_fps=return_video_sample_fps)
+        fetch_video_kwargs = {"return_video_sample_fps": return_video_sample_fps}
+        if "image_factor" in _FETCH_VIDEO_PARAMETERS:
+            fetch_video_kwargs["image_factor"] = image_factor
+        elif "image_patch_size" in _FETCH_VIDEO_PARAMETERS:
+            fetch_video_kwargs["image_patch_size"] = _image_patch_size(image_factor)
+        return fetch_video(video, **fetch_video_kwargs)

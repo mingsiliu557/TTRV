@@ -13,6 +13,7 @@
 # limitations under the License.
 """Utils for tokenization."""
 
+import os
 import warnings
 import re
 from transformers import AutoConfig
@@ -87,6 +88,10 @@ def hf_processor(name_or_path, **kwargs):
     from transformers import AutoProcessor
     trust_remote_code=True
     config = AutoConfig.from_pretrained(name_or_path, trust_remote_code=True)
+    if re.match(r"qwen2(?:_5)?_vl", config.model_type, re.IGNORECASE):
+        # Pin the saved slow processor explicitly so step-0 and post-training
+        # validation cannot drift when transformers changes its default.
+        kwargs.setdefault("use_fast", False)
     try:
         if re.match("internvl", config.model_type, re.IGNORECASE):
             print("InterVLProcessor initilizing")
@@ -125,6 +130,24 @@ def hf_processor(name_or_path, **kwargs):
             print("Training the InternVL series")
         else:
             processor = AutoProcessor.from_pretrained(name_or_path, **kwargs)
+            if re.match(r"qwen2(?:_5)?_vl", config.model_type, re.IGNORECASE):
+                image_processor = getattr(processor, "image_processor", None)
+                if image_processor is not None:
+                    max_pixels = os.environ.get("QWEN_MAX_PIXELS")
+                    min_pixels = os.environ.get("QWEN_MIN_PIXELS")
+                    if max_pixels:
+                        image_processor.max_pixels = int(max_pixels)
+                        if isinstance(getattr(image_processor, "size", None), dict):
+                            image_processor.size["longest_edge"] = int(max_pixels)
+                    if min_pixels:
+                        image_processor.min_pixels = int(min_pixels)
+                        if isinstance(getattr(image_processor, "size", None), dict):
+                            image_processor.size["shortest_edge"] = int(min_pixels)
+                    print(
+                        "Qwen image pixel bounds:",
+                        getattr(image_processor, "min_pixels", None),
+                        getattr(image_processor, "max_pixels", None),
+                    )
 
     except Exception as e:
         processor = None

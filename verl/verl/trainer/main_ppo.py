@@ -68,11 +68,24 @@ def run_ppo(config) -> None:
     # isolation, will solve in the future
     os.environ["ENSURE_CUDA_VISIBLE_DEVICES"] = os.environ.get("CUDA_VISIBLE_DEVICES", "")
     if not ray.is_initialized():
-        # this is for local ray cluster
+        ray_init_kwargs = {}
+        ray_tmpdir = os.environ.get("RAY_TMPDIR")
+        if ray_tmpdir:
+            os.makedirs(ray_tmpdir, exist_ok=True)
+            ray_init_kwargs["_temp_dir"] = ray_tmpdir
+        if os.environ.get("SLURM_JOB_ID") or os.environ.get("CLUSTER_VERIFIED_JOB_ID"):
+            import torch
+            ray_init_kwargs.update(
+                num_cpus=int(os.environ.get("SLURM_CPUS_PER_TASK", os.environ.get("TTRV_ALLOCATED_CPUS", "4"))),
+                num_gpus=torch.cuda.device_count(),
+                include_dashboard=False,
+                object_store_memory=int(os.environ.get("TTRV_RAY_OBJECT_STORE_BYTES", "268435456")),
+            )
         ray.init(
             runtime_env={
                 "env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN"}
-            }
+            },
+            **ray_init_kwargs,
         )
 
     runner = TaskRunner.remote()
@@ -93,7 +106,23 @@ class TaskRunner:
 
         from verl.utils.fs import copy_to_local
 
-        pprint(OmegaConf.to_container(config, resolve=True))  # resolve=True will eval symbol values
+        if os.environ.get("VERL_PRINT_FULL_CONFIG", "0").lower() in {"1", "true", "yes"}:
+            pprint(OmegaConf.to_container(config, resolve=True))  # resolve=True will eval symbol values
+        else:
+            print(
+                "Resolved run config:",
+                {
+                    "model": config.actor_rollout_ref.model.path,
+                    "train_files": list(config.data.train_files),
+                    "val_files": list(config.data.val_files),
+                    "train_batch_size": config.data.train_batch_size,
+                    "rollout_n": config.actor_rollout_ref.rollout.n,
+                    "gpus": config.trainer.n_gpus_per_node,
+                    "epochs": config.trainer.total_epochs,
+                    "total_training_steps": config.trainer.total_training_steps,
+                    "reward_style": config.reward_model.reward_kwargs.reward_style,
+                },
+            )
         OmegaConf.resolve(config)
 
         # download the checkpoint from hdfs

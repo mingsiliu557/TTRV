@@ -247,6 +247,10 @@ class ActorRolloutRefWorker(Worker):
                 for param in actor_module.vision_model.parameters():
                     param.requires_grad = False
                 frozen_vision_tower = True
+            elif re.match(r"qwen2(?:_5)?_vl", actor_module.config.model_type, re.IGNORECASE):
+                # Attention-space counterfactuals need the repeated visual token
+                # used by the language model, not the vision boundary token.
+                actor_module.img_context_token_id = self.tokenizer.convert_tokens_to_ids("<|image_pad|>")
             if frozen_vision_tower:
                 if re.match("gemma3", actor_module.config.model_type, re.IGNORECASE):
                     for name, param in actor_module.named_parameters():

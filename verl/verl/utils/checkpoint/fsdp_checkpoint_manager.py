@@ -57,9 +57,9 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             assert "tokenizer" in kwargs, "tokenizer or processor must be provided"
             warnings.warn("`tokenizer` is deprecated. use `processing_class` instead.", DeprecationWarning)
             processing_class = kwargs.pop("tokenizer")
-        assert (
-            "model" in checkpoint_contents and "optimizer" in checkpoint_contents and "extra" in checkpoint_contents
-        ), f"FSDPCheckpointManager must include ['model', 'optimizer', 'extra'], got {checkpoint_contents}"
+        assert "model" in checkpoint_contents, (
+            f"FSDPCheckpointManager requires model weights, got {checkpoint_contents}"
+        )
 
         super().__init__(
             model,
@@ -154,11 +154,11 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             warnings.simplefilter("ignore")
             with FSDP.state_dict_type(self.model, StateDictType.SHARDED_STATE_DICT, state_dict_cfg, optim_cfg):
                 model_state_dict = self.model.state_dict()
-                if self.optimizer is not None:
+                if "optimizer" in self.checkpoint_contents and self.optimizer is not None:
                     optimizer_state_dict = self.optimizer.state_dict()
                 else:
                     optimizer_state_dict = None
-                if self.lr_scheduler is not None:
+                if "extra" in self.checkpoint_contents and self.lr_scheduler is not None:
                     lr_scheduler_state_dict = self.lr_scheduler.state_dict()
                 else:
                     lr_scheduler_state_dict = None
@@ -173,11 +173,12 @@ class FSDPCheckpointManager(BaseCheckpointManager):
 
                 print(f"[rank-{self.rank}]: Saving model to {os.path.abspath(model_path)}")
                 print(f"[rank-{self.rank}]: Saving checkpoint to {os.path.abspath(model_path)}")
-                print(f"[rank-{self.rank}]: Saving extra_state to {os.path.abspath(extra_path)}")
                 torch.save(model_state_dict, model_path)
                 if optimizer_state_dict is not None:
                     torch.save(optimizer_state_dict, optim_path)
-                torch.save(extra_state_dict, extra_path)
+                if "extra" in self.checkpoint_contents:
+                    print(f"[rank-{self.rank}]: Saving extra_state to {os.path.abspath(extra_path)}")
+                    torch.save(extra_state_dict, extra_path)
 
         if "hf_model" in self.checkpoint_contents:
             # wait for everyone to dump to local

@@ -15,6 +15,7 @@
 import inspect
 import logging
 import os
+import types
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -32,6 +33,111 @@ from .patch import patched_ds_v3_load_weights, patched_qwen_moe_load_weights
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_PPO_LOGGING_LEVEL", "WARN"))
+
+
+def _normalize_qwen25_vl_weight_name(name: str) -> str:
+    """Convert transformers 4.52 in-memory names to HF checkpoint names."""
+    if name.startswith("model.visual."):
+        return name[len("model.") :]
+    if name.startswith("model.language_model."):
+        return "model." + name[len("model.language_model.") :]
+    return name
+
+
+def _qwen25_vl_process_image_input(self, image_input):
+    """Process images without reusing the CUDA grid after vision execution.
+
+    vLLM 0.7.3 can invalidate the multimodal grid storage after the vision
+    forward when its sleep-mode allocator is used alongside FSDP. Preserve
+    the split sizes as CPU integers before entering the vision tower.
+    """
+    grid_thw = image_input["image_grid_thw"]
+    assert grid_thw.ndim == 2
+    merge_size = self.visual.spatial_merge_size
+    split_sizes = (
+        grid_thw.detach().to(device="cpu", dtype=torch.int64).prod(-1) // merge_size // merge_size
+    ).tolist()
+    debug = os.environ.get("QWEN_VLLM_SYNC_DEBUG") == "1"
+    if debug:
+        print(
+            "[qwen-vllm-debug] image input",
+            {
+                "type": image_input["type"],
+                "grid_shape": tuple(grid_thw.shape),
+                "grid_dtype": str(grid_thw.dtype),
+                "grid_device": str(grid_thw.device),
+                "split_sizes": split_sizes,
+            },
+            flush=True,
+        )
+        torch.cuda.synchronize()
+
+    if image_input["type"] == "image_embeds":
+        image_embeds = image_input["image_embeds"].type(self.visual.dtype)
+    else:
+        pixel_values = image_input["pixel_values"].type(self.visual.dtype)
+        if debug:
+            print(
+                "[qwen-vllm-debug] pixel values",
+                {
+                    "shape": tuple(pixel_values.shape),
+                    "dtype": str(pixel_values.dtype),
+                    "device": str(pixel_values.device),
+                    "contiguous": pixel_values.is_contiguous(),
+                },
+                flush=True,
+            )
+            torch.cuda.synchronize()
+        image_embeds = self.visual(pixel_values, grid_thw=grid_thw)
+        if debug:
+            torch.cuda.synchronize()
+            print(
+                "[qwen-vllm-debug] visual forward complete",
+                {"shape": tuple(image_embeds.shape), "finite": bool(torch.isfinite(image_embeds).all().item())},
+                flush=True,
+            )
+
+    return image_embeds.split(split_sizes)
+
+
+def _install_qwen25_vl_compat_forward(model) -> None:
+    if getattr(model, "_verl_qwen_vllm_compat_installed", False):
+        return
+    model._process_image_input = types.MethodType(_qwen25_vl_process_image_input, model)
+    model._verl_qwen_vllm_compat_installed = True
+
+
+def _validate_qwen25_vl_synced_weight(model, updated_params, world_size: int) -> None:
+    if os.environ.get("QWEN_VLLM_SYNC_DEBUG") != "1":
+        return
+    source_name = "model.visual.patch_embed.proj.weight"
+    target_name = _normalize_qwen25_vl_weight_name(source_name)
+    source_param = updated_params.get(source_name)
+    target_param = dict(model.named_parameters()).get(target_name)
+    if source_param is None or target_param is None:
+        print(
+            "[qwen-vllm-debug] weight check unavailable",
+            {"source_found": source_param is not None, "target_found": target_param is not None},
+            flush=True,
+        )
+        return
+
+    source = source_param.full_tensor() if world_size != 1 and hasattr(source_param, "full_tensor") else source_param
+    source = source.detach().to(device=target_param.device, dtype=target_param.dtype)
+    target = target_param.detach()
+    torch.cuda.synchronize()
+    print(
+        "[qwen-vllm-debug] weight check",
+        {
+            "source_shape": tuple(source.shape),
+            "target_shape": tuple(target.shape),
+            "max_abs_diff": float((source - target).abs().max().item()),
+            "source_finite": bool(torch.isfinite(source).all().item()),
+            "target_finite": bool(torch.isfinite(target).all().item()),
+        },
+        flush=True,
+    )
+    del source
 
 
 class FSDPVLLMShardingManager(BaseShardingManager):
@@ -103,12 +209,18 @@ class FSDPVLLMShardingManager(BaseShardingManager):
 
             # update model params
             self.update_params(params)
+            torch.cuda.synchronize()
+            model = self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model
+            if model.config.architectures[0] == "Qwen2_5_VLForConditionalGeneration":
+                _validate_qwen25_vl_synced_weight(model, params, torch.distributed.get_world_size())
+                _install_qwen25_vl_compat_forward(model)
             log_gpu_memory_usage("After sync model weights in sharding manager", logger=logger)
             del params
             torch.cuda.empty_cache()
 
             if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
                 self.inference_engine.wake_up(tags=["kv_cache"])
+            torch.cuda.synchronize()
 
         log_gpu_memory_usage("After del state_dict and empty_cache in sharding manager", logger=logger)
 
@@ -125,11 +237,13 @@ class FSDPVLLMShardingManager(BaseShardingManager):
 
     def __exit__(self, exc_type, exc_value, traceback):
         log_gpu_memory_usage("Before vllm offload in sharding manager", logger=logger)
+        torch.cuda.synchronize()
         # TODO(ZSL): check this
         if vllm_version in ("0.4.2", "0.5.4", "0.6.3"):
             self.inference_engine.offload_model_weights()
         else:
             self.inference_engine.sleep(level=1)
+        torch.cuda.synchronize()
         log_gpu_memory_usage("After vllm offload in sharding manager", logger=logger)
 
         # self.module.to('cuda')
@@ -185,6 +299,16 @@ class FSDPVLLMShardingManager(BaseShardingManager):
                     (name, param.full_tensor() if world_size != 1 and hasattr(param, "full_tensor") else param)
                     for name, param in updated_params.items()
                 ),
+            )
+        elif model.config.architectures[0] == "Qwen2_5_VLForConditionalGeneration":
+            loaded_params = model.load_weights(
+                (
+                    (
+                        _normalize_qwen25_vl_weight_name(name),
+                        param.full_tensor() if world_size != 1 and hasattr(param, "full_tensor") else param,
+                    )
+                    for name, param in updated_params.items()
+                )
             )
         else:
             loaded_params = model.load_weights(

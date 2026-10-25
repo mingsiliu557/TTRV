@@ -168,9 +168,13 @@ class RLHFDataset(Dataset):
                 def doc2len(doc) -> int:
                     return len(tokenizer.apply_chat_template(doc[prompt_key], add_generation_prompt=True))
 
+            # datasets still forks a child when num_proc=1. Inside a Ray actor,
+            # that child inherits Ray's SIGTERM handler and can hang during pool
+            # teardown after filtering. Run the single-worker case in-process.
+            filter_num_proc = self.num_workers if self.num_workers > 1 else None
             self.dataframe = self.dataframe.filter(
                 lambda doc: doc2len(doc) <= self.max_prompt_length,
-                num_proc=self.num_workers,
+                num_proc=filter_num_proc,
                 desc=f"Filtering prompts longer than {self.max_prompt_length} tokens",
             )
 
