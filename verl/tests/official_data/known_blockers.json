@@ -1,0 +1,69 @@
+{
+  "report_date": "2026-10-26",
+  "branch": "official-ai2d-mme-adapter",
+  "implementation_commit": "7078553",
+  "status": "training_blocked",
+  "summary_zh": "官方数据适配代码已实现；GPU 契约测试确认原 reward 写入位置错误，且未找到所需官方 TSV。按计划停止，未启动双卡 smoke 或正式训练。",
+  "executed_checks": {
+    "data_and_scorer_fixtures": {"passed": 13, "failed": 0},
+    "pinned_upstream_definition_ast_parity": {"passed": 16, "failed": 0},
+    "internvl3_2b_single_gpu_loader": {
+      "passed": true,
+      "weight_dtype": "float32",
+      "forward_autocast_dtype": "bfloat16",
+      "checked_tensors": 685,
+      "text_forward_finite": true,
+      "cpu_peak_process_rss_mib": 1452.2,
+      "limitation": "Text-only loader/forward check, not multimodal accuracy or total training-job memory validation."
+    },
+    "gpu_contract_tests": {"passed": 4, "failed": 3}
+  },
+  "blockers": [
+    {
+      "id": "I11_REWARD_TOKEN_POSITION",
+      "kind": "confirmed_preexisting_training_correctness_defect",
+      "source": "verl/verl/workers/reward_manager/ttrl.py",
+      "locations_at_implementation_commit": [
+        {"function": "_compute_ttrl_reward", "line": 732},
+        {"function": "_compute_eval_reward", "line": 1066}
+      ],
+      "cause_zh": "先遍历回答计算 valid_response_length，随后写 reward 的循环复用了该变量的最后一个值，没有使用每条回答自己的有效长度。训练分支对每组保留的前 16 条回答同样存在此问题。",
+      "demonstration": {
+        "response_lengths": [1, 4, 7],
+        "expected_reward_columns_zero_based": [0, 3, 6],
+        "actual_reward_columns_zero_based": [6, 6, 6]
+      },
+      "empty_last_response_zh": "最后一条回答长度为 0 时，复用的索引为 -1；前面非空回答的 reward 也会写到最后一列，而不是各自的有效末 token。",
+      "impact_zh": "训练 reward 可能落入 padding，破坏 reward 与 response mask/advantage 的对齐。内部准确率看似正常不能证明 token-level reward 正确。",
+      "failing_tests": [
+        "test_eval_reward_uses_each_response_end[lengths0]",
+        "test_eval_reward_uses_each_response_end[lengths1]",
+        "test_train_32_to_16_reward_alignment"
+      ],
+      "reproduce_from_verl_directory": "python -m pytest tests/official_data/test_gpu_contract.py -q",
+      "reproduction_requirement": "Use the existing allocated GPU shell and project environment; tests require CUDA. No model or dataset download is needed for these contract fixtures.",
+      "action_taken_zh": "保留失败测试作为阻断门禁，未修改这两处原训练逻辑，未跳过或 xfail 测试。",
+      "proposed_followup_zh": "单独审查并修复逐回答末 token 索引；显式处理空回答；重新验证两组各 32 rollout 保留各前 16 条时的长度、顺序与 reward 对齐。此建议尚未实施。"
+    },
+    {
+      "id": "OFFICIAL_TSV_MISSING",
+      "kind": "missing_required_input",
+      "required_files": ["AI2D_TEST.tsv", "MME.tsv"],
+      "expected_md5": {
+        "AI2D_TEST.tsv": "0f593e0d1c7df9a3d69bf1f947e71975",
+        "MME.tsv": "b36b43c3f09801f5d368627fb92187c3"
+      },
+      "cause_zh": "本轮检查未找到固定版本的官方原始 TSV；现有本地集合为旧转换数据，不能证明其等于完整官方评测集。",
+      "action_taken_zh": "未自动下载 benchmark，未用旧转换集或 AI2D NO_MASK 替代，未生成或发布官方全量分数。"
+    }
+  ],
+  "not_yet_validated": [
+    "Complete official-data conversion and actual model preprocessing of all benchmark rows",
+    "Multimodal forward on official inputs",
+    "Two-GPU end-to-end Base/TTRV/PROVE smoke",
+    "Full training under the whole-job 4 GiB CPU-memory cap",
+    "Full official benchmark scoring and paired comparisons"
+  ],
+  "next_run_entrypoint": "python -m scripts.official_data.run_suite --source-root <official-tsv-dir> --data-root <fresh-data-dir> --output <fresh-run-dir> --model <local-internvl3-2b-snapshot>",
+  "publication_scope": "Sanitized diagnosis and test counts only. No original logs, predictions, images, datasets, credentials, hostnames or private filesystem paths."
+}
